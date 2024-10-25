@@ -16,6 +16,49 @@ import AppSubsystem
 /* 3rd-party */
 import FirebaseDatabase
 
+public enum CoreDatabaseCache {
+    // MARK: - Properties
+
+    private static var dataSamples = CoreDatabase.cachedDataSamples
+
+    // MARK: - Methods
+
+    public static func addValue(_ value: DataSample, forKey key: String) {
+        var cachedDataSamples = dataSamples ?? [:]
+        cachedDataSamples[key] = value
+        dataSamples = cachedDataSamples
+    }
+
+    public static func clear() {
+        dataSamples = nil
+    }
+
+    public static func filter(_ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool) {
+        dataSamples = dataSamples?.filter { isIncluded($0) }
+    }
+
+    public static func getValue(forKey key: String) -> Any? {
+        guard let cachedDataSample = dataSamples?[key],
+              !cachedDataSample.isExpired,
+              !(cachedDataSample.data is NSNull) else {
+            dataSamples?[key] = nil
+            return nil
+        }
+
+        Logger.log(
+            "Returning cached value for data at path \"\(key)\".",
+            domain: .caches,
+            metadata: [self, #file, #function, #line]
+        )
+
+        return cachedDataSample.data
+    }
+
+    public static func removeValue(forKey key: String) {
+        dataSamples?[key] = nil
+    }
+}
+
 final class CoreDatabase {
     // MARK: - Types
 
@@ -30,7 +73,7 @@ final class CoreDatabase {
 
     // MARK: - Properties
 
-    @Cached(CacheKey.dataSamples) private var cachedDataSamples: [String: DataSample]?
+    @Cached(CacheKey.dataSamples) fileprivate static var cachedDataSamples: [String: DataSample]?
     private var globalCacheStrategy: CacheStrategy?
 
     // MARK: - ID Key Generation
@@ -120,7 +163,7 @@ final class CoreDatabase {
 
         let path = prependingEnvironment ? path.prepended : path
         func completeWithCacheIfPresent() -> Bool {
-            guard let cachedValue = cachedValue(atPath: path),
+            guard let cachedValue = CoreDatabaseCache.getValue(forKey: path),
                   canComplete else { return false }
             completion(.success(cachedValue))
             return true
@@ -164,13 +207,14 @@ final class CoreDatabase {
                 return
             }
 
-            var cachedDataSamples = self.cachedDataSamples ?? [:]
-            cachedDataSamples[path] = .init(
-                .now,
-                data: value,
-                expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: observeSingleEventStartDate))
+            CoreDatabaseCache.addValue(
+                .init(
+                    .now,
+                    data: value,
+                    expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: observeSingleEventStartDate))
+                ),
+                forKey: path
             )
-            self.cachedDataSamples = cachedDataSamples
 
             guard canComplete else { return }
             completion(.success(value))
@@ -216,7 +260,7 @@ final class CoreDatabase {
 
         let path = prependingEnvironment ? path.prepended : path
         func completeWithCacheIfPresent() -> Bool {
-            guard let cachedValue = cachedValue(atPath: path),
+            guard let cachedValue = CoreDatabaseCache.getValue(forKey: path),
                   canComplete else { return false }
             completion(.success(cachedValue))
             return true
@@ -252,13 +296,14 @@ final class CoreDatabase {
                 return
             }
 
-            var cachedDataSamples = cachedDataSamples ?? [:]
-            cachedDataSamples[path] = .init(
-                .now,
-                data: value,
-                expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: queryLimitedStartDate))
+            CoreDatabaseCache.addValue(
+                .init(
+                    .now,
+                    data: value,
+                    expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: queryLimitedStartDate))
+                ),
+                forKey: path
             )
-            self.cachedDataSamples = cachedDataSamples
 
             guard canComplete else { return }
             completion(.success(value))
@@ -334,8 +379,7 @@ final class CoreDatabase {
         )
 
         let key = prependingEnvironment ? key.prepended : key
-        cachedDataSamples?[key] = nil
-
+        CoreDatabaseCache.removeValue(forKey: key)
         firebaseDatabase.child(key).setValue(value) { error, _ in
             timeout.cancel()
             guard canComplete else { return }
@@ -383,8 +427,7 @@ final class CoreDatabase {
         )
 
         let key = prependingEnvironment ? key.prepended : key
-        cachedDataSamples?[key] = nil
-
+        CoreDatabaseCache.removeValue(forKey: key)
         firebaseDatabase.child(key).updateChildValues(data) { error, _ in
             timeout.cancel()
             guard canComplete else { return }
@@ -394,30 +437,11 @@ final class CoreDatabase {
 
     // MARK: - Clear Cache
 
-    func clearCache() {
-        cachedDataSamples = nil
-    }
+//    func clearCache() {
+//        cachedDataSamples = nil
+//    }
 
     // MARK: - Auxiliary
-
-    private func cachedValue(atPath path: String) -> Any? {
-        guard let cachedDataSamples,
-              let cachedDataSample = cachedDataSamples[path] else { return nil }
-
-        guard !cachedDataSample.isExpired,
-              !isEmpty(cachedDataSample) else {
-            self.cachedDataSamples?[path] = nil
-            return nil
-        }
-
-        Logger.log(
-            "Returning cached value for data at path \"\(path)\".",
-            domain: .caches,
-            metadata: [self, #file, #function, #line]
-        )
-
-        return cachedDataSample.data
-    }
 
     private func isEmpty(_ value: Any?) -> Bool { value is NSNull }
 }

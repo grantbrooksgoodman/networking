@@ -13,8 +13,6 @@ import AppSubsystem
 
 // swiftlint:disable:next class_delegate_protocol
 public protocol DatabaseDelegate {
-    func clearCache()
-
     func generateKey(for path: String) -> String?
 
     func getValues(

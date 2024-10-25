@@ -121,12 +121,6 @@ struct Database: DatabaseDelegate {
             }
         }
     }
-
-    // MARK: - Clear Cache
-
-    func clearCache() {
-        coreDatabase.clearCache()
-    }
 }
 
 /* MARK: CoreDatabase Dependency */
