@@ -1,0 +1,4 @@
+.DS_Store
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+Package.resolved
+xcuserdata/
