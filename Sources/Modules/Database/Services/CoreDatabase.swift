@@ -16,52 +16,44 @@ import AppSubsystem
 /* 3rd-party */
 import FirebaseDatabase
 
-public enum CoreDatabaseCache {
-    // MARK: - Types
-
-    private enum CacheKey: String, CaseIterable {
-        case dataSamples
-    }
-
+public enum CoreDatabaseStore {
     // MARK: - Properties
 
-    @Cached(CacheKey.dataSamples) private static var cachedDataSamples: [String: DataSample]?
+    @LockIsolated private static var storedDataSamples = [String: DataSample]()
 
     // MARK: - Methods
 
     public static func addValue(_ value: DataSample, forKey key: String) {
-        var cachedDataSamples = cachedDataSamples ?? [:]
-        cachedDataSamples[key] = value
-        self.cachedDataSamples = cachedDataSamples
+        storedDataSamples[key] = value
     }
 
-    public static func clear() {
-        cachedDataSamples = nil
+    public static func clearStore() {
+        storedDataSamples = [:]
     }
 
     public static func filter(_ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool) {
-        cachedDataSamples = cachedDataSamples?.filter { isIncluded($0) }
+        storedDataSamples = storedDataSamples.filter { isIncluded($0) }
     }
 
     public static func getValue(forKey key: String) -> Any? {
-        guard let cachedDataSample = cachedDataSamples?[key],
-              !cachedDataSample.isExpired,
-              !(cachedDataSample.data is NSNull) else {
-            cachedDataSamples?[key] = nil
+        guard let storedDataSample = storedDataSamples[key],
+              !storedDataSample.isExpired,
+              !(storedDataSample.data is NSNull) else {
+            storedDataSamples[key] = nil
             return nil
         }
 
         Logger.log(
-            "Returning cached value for data at path \"\(key)\".",
+            "Returning stored value for data at path \"\(key)\".",
             domain: .caches,
             metadata: [self, #file, #function, #line]
         )
 
-        return cachedDataSample.data
+        return storedDataSample.data
     }
 
     public static func removeValue(forKey key: String) {
-        cachedDataSamples?[key] = nil
+        storedDataSamples[key] = nil
     }
 }
 
@@ -162,7 +154,7 @@ final class CoreDatabase {
 
         let path = prependingEnvironment ? path.prepended : path
         func completeWithCacheIfPresent() -> Bool {
-            guard let cachedValue = CoreDatabaseCache.getValue(forKey: path),
+            guard let cachedValue = CoreDatabaseStore.getValue(forKey: path),
                   canComplete else { return false }
             completion(.success(cachedValue))
             return true
@@ -206,7 +198,7 @@ final class CoreDatabase {
                 return
             }
 
-            CoreDatabaseCache.addValue(
+            CoreDatabaseStore.addValue(
                 .init(
                     data: value,
                     expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: observeSingleEventStartDate))
@@ -258,7 +250,7 @@ final class CoreDatabase {
 
         let path = prependingEnvironment ? path.prepended : path
         func completeWithCacheIfPresent() -> Bool {
-            guard let cachedValue = CoreDatabaseCache.getValue(forKey: path),
+            guard let cachedValue = CoreDatabaseStore.getValue(forKey: path),
                   canComplete else { return false }
             completion(.success(cachedValue))
             return true
@@ -294,7 +286,7 @@ final class CoreDatabase {
                 return
             }
 
-            CoreDatabaseCache.addValue(
+            CoreDatabaseStore.addValue(
                 .init(
                     data: value,
                     expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: queryLimitedStartDate))
@@ -376,7 +368,7 @@ final class CoreDatabase {
         )
 
         let key = prependingEnvironment ? key.prepended : key
-        CoreDatabaseCache.addValue(
+        CoreDatabaseStore.addValue(
             .init(
                 data: value,
                 expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: .now))
@@ -431,7 +423,7 @@ final class CoreDatabase {
         )
 
         let key = prependingEnvironment ? key.prepended : key
-        CoreDatabaseCache.addValue(
+        CoreDatabaseStore.addValue(
             .init(
                 data: data,
                 expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: .now))
