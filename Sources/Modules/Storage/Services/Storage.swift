@@ -102,10 +102,10 @@ struct Storage: StorageDelegate {
         }
     }
 
-    // MARK: - Clear Cache
+    // MARK: - Clear Store
 
-    func clearCache() {
-        coreStorage.clearCache()
+    func clearStore() {
+        coreStorage.clearStore()
     }
 }
 

@@ -13,7 +13,7 @@ import AppSubsystem
 
 // swiftlint:disable:next class_delegate_protocol
 public protocol StorageDelegate {
-    func clearCache()
+    func clearStore()
 
     func deleteItem(
         at path: String,

@@ -17,16 +17,8 @@ import AppSubsystem
 import FirebaseStorage
 
 final class CoreStorage {
-    // MARK: - Types
-
-    private enum CacheKey: String, CaseIterable {
-        case downloadItemResults
-        case itemExistsResults
-    }
-
     // MARK: - Dependencies
 
-    @Dependency(\.currentCalendar) private var calendar: Calendar
     @Dependency(\.fileManager) private var fileManager: FileManager
     @Dependency(\.firebaseStorage) private var firebaseStorage: StorageReference
     @Dependency(\.build.isOnline) private var isOnline: Bool
@@ -37,8 +29,8 @@ final class CoreStorage {
     private var globalCacheStrategy: CacheStrategy?
 
     // Dictionary
-    @Cached(CacheKey.downloadItemResults) private var cachedDownloadItemResults: [String: DataSample]?
-    @Cached(CacheKey.itemExistsResults) private var cachedItemExistsResults: [String: DataSample]?
+    @LockIsolated private var storedDownloadItemResults = [String: DataSample]()
+    @LockIsolated private var storedItemExistsResults = [String: DataSample]()
 
     // MARK: - Global Cache Strategy
 
@@ -81,8 +73,8 @@ final class CoreStorage {
             metadata: [self, #file, #function, #line]
         )
 
-        cachedDownloadItemResults?[metadata.filePath] = nil
-        cachedItemExistsResults?[metadata.filePath] = nil
+        storedDownloadItemResults[metadata.filePath] = nil
+        storedItemExistsResults[metadata.filePath] = nil
 
         firebaseStorage.putData(
             data,
@@ -129,17 +121,18 @@ final class CoreStorage {
             completion(.timedOut([self, #file, #function, #line]))
         }
 
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+
         Logger.log(
             "Deleting item at path \"\(path)\".",
             domain: .storage,
             metadata: [self, #file, #function, #line]
         )
 
-        cachedDownloadItemResults?[path] = nil
-        cachedItemExistsResults?[path] = nil
+        storedDownloadItemResults[path] = nil
+        storedItemExistsResults[path] = nil
 
-        let itemPath = prependingEnvironment ? path.prependingCurrentEnvironment : path
-        let itemReference = firebaseStorage.child(itemPath)
+        let itemReference = firebaseStorage.child(path)
         itemReference.delete { error in
             timeout.cancel()
             guard canComplete else { return }
@@ -179,7 +172,7 @@ final class CoreStorage {
 
         let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
         func completeWithCacheIfPresent() -> Bool {
-            guard cachedDownloadItemResultIsValid(localPath: localPath, networkPath: path),
+            guard storedDownloadItemResultIsValid(localPath: localPath, networkPath: path),
                   canComplete else { return false }
             completion(nil)
             return true
@@ -211,19 +204,19 @@ final class CoreStorage {
 
             switch writeResult {
             case .success:
-                var cachedDownloadItemResults = self.cachedDownloadItemResults ?? [:]
-                cachedDownloadItemResults[path] = .init(
+                self.storedDownloadItemResults[path] = .init(
                     data: localPath,
                     expiresAfter: .milliseconds(cacheExpiry)
                 )
-                self.cachedDownloadItemResults = cachedDownloadItemResults
 
                 guard canComplete else { return }
                 completion(nil)
 
             case let .failure(error):
                 if cacheStrategy == .returnCacheOnFailure,
-                   completeWithCacheIfPresent() {}
+                   completeWithCacheIfPresent() {
+                    return
+                }
 
                 guard canComplete else { return }
                 completion(.init(error, metadata: [self, #file, #function, #line]))
@@ -256,9 +249,9 @@ final class CoreStorage {
 
         let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
         func completeWithCacheIfPresent() -> Bool {
-            guard let cachedItemExistsResult = cachedItemExistsResult(path: path),
+            guard let storedItemExistsResult = storedItemExistsResult(path: path),
                   canComplete else { return false }
-            completion(.success(cachedItemExistsResult))
+            completion(.success(storedItemExistsResult))
             return true
         }
 
@@ -288,12 +281,10 @@ final class CoreStorage {
 
             switch getMetadataResult {
             case .success:
-                var cachedItemExistsResults = self.cachedItemExistsResults ?? [:]
-                cachedItemExistsResults[path] = .init(
+                self.storedItemExistsResults[path] = .init(
                     data: true,
                     expiresAfter: .milliseconds(cacheExpiry)
                 )
-                self.cachedItemExistsResults = cachedItemExistsResults
 
                 guard canComplete else { return }
                 completion(.success(true))
@@ -312,12 +303,10 @@ final class CoreStorage {
                     return
                 }
 
-                var cachedItemExistsResults = self.cachedItemExistsResults ?? [:]
-                cachedItemExistsResults[path] = .init(
+                self.storedItemExistsResults[path] = .init(
                     data: false,
                     expiresAfter: .milliseconds(cacheExpiry)
                 )
-                self.cachedItemExistsResults = cachedItemExistsResults
 
                 guard canComplete else { return }
                 completion(.success(false))
@@ -325,28 +314,28 @@ final class CoreStorage {
         }
     }
 
-    // MARK: - Clear Cache
+    // MARK: - Clear Store
 
-    func clearCache() {
-        cachedDownloadItemResults = nil
-        cachedItemExistsResults = nil
+    func clearStore() {
+        storedDownloadItemResults = .init()
+        storedItemExistsResults = .init()
     }
 
     // MARK: - Auxiliary
 
-    private func cachedDownloadItemResultIsValid(localPath: URL, networkPath: String) -> Bool {
-        guard let cachedDataSample = cachedDownloadItemResults?[networkPath] else { return false }
+    private func storedDownloadItemResultIsValid(localPath: URL, networkPath: String) -> Bool {
+        guard let storedDataSample = storedDownloadItemResults[networkPath] else { return false }
 
-        guard !cachedDataSample.isExpired,
-              let cachedLocalPath = cachedDataSample.data as? URL,
-              cachedLocalPath == localPath,
+        guard !storedDataSample.isExpired,
+              let storedLocalPath = storedDataSample.data as? URL,
+              storedLocalPath == localPath,
               fileManager.fileExists(atPath: localPath.path()) || fileManager.fileExists(atPath: localPath.path(percentEncoded: false)) else {
-            cachedDownloadItemResults?[networkPath] = nil
+            storedDownloadItemResults[networkPath] = nil
             return false
         }
 
         Logger.log(
-            "Returning cached download item result for network path \"\(networkPath)\".",
+            "Returning stored download item result for network path \"\(networkPath)\".",
             domain: .caches,
             metadata: [self, #file, #function, #line]
         )
@@ -354,22 +343,22 @@ final class CoreStorage {
         return true
     }
 
-    private func cachedItemExistsResult(path: String) -> Bool? {
-        guard let cachedDataSample = cachedItemExistsResults?[path] else { return nil }
+    private func storedItemExistsResult(path: String) -> Bool? {
+        guard let storedDataSample = storedItemExistsResults[path] else { return nil }
 
-        guard !cachedDataSample.isExpired,
-              let cachedItemExistsResult = cachedDataSample.data as? Bool else {
-            cachedItemExistsResults?[path] = nil
+        guard !storedDataSample.isExpired,
+              let storedItemExistsResult = storedDataSample.data as? Bool else {
+            storedItemExistsResults[path] = nil
             return nil
         }
 
         Logger.log(
-            "Returning cached item exists result for network path \"\(path)\".",
+            "Returning stored item exists result for network path \"\(path)\".",
             domain: .caches,
             metadata: [self, #file, #function, #line]
         )
 
-        return cachedItemExistsResult
+        return storedItemExistsResult
     }
 }
 
