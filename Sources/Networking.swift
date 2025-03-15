@@ -44,6 +44,7 @@ public extension Networking {
         package var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         package var authDelegate: AuthDelegate = Auth()
         package var databaseDelegate: DatabaseDelegate = Database()
+        package var hostedTranslationDelegate: HostedTranslationDelegate = HostedTranslationService()
         package var storageDelegate: StorageDelegate = Storage()
 
         /* MARK: Computed Properties */
@@ -78,11 +79,13 @@ public extension Networking {
             activityIndicatorDelegate: NetworkActivityIndicatorDelegate? = nil,
             authDelegate: AuthDelegate? = nil,
             databaseDelegate: DatabaseDelegate? = nil,
+            hostedTranslationDelegate: HostedTranslationDelegate? = nil,
             storageDelegate: StorageDelegate? = nil
         ) -> Exception? {
             guard activityIndicatorDelegate != nil ||
                 authDelegate != nil ||
                 databaseDelegate != nil ||
+                hostedTranslationDelegate != nil ||
                 storageDelegate != nil else {
                 return .init(
                     "No delegates provided in arguments.",
@@ -90,10 +93,11 @@ public extension Networking {
                 )
             }
 
-            self.activityIndicatorDelegate = activityIndicatorDelegate ?? DefaultNetworkActivityIndicatorDelegate()
-            self.authDelegate = authDelegate ?? Auth()
-            self.databaseDelegate = databaseDelegate ?? Database()
-            self.storageDelegate = storageDelegate ?? Storage()
+            if let activityIndicatorDelegate { registerActivityIndicatorDelegate(activityIndicatorDelegate) }
+            if let authDelegate { registerAuthDelegate(authDelegate) }
+            if let databaseDelegate { registerDatabaseDelegate(databaseDelegate) }
+            if let hostedTranslationDelegate { registerHostedTranslationDelegate(hostedTranslationDelegate) }
+            if let storageDelegate { registerStorageDelegate(storageDelegate) }
 
             return nil
         }
@@ -104,6 +108,10 @@ public extension Networking {
 
         public func registerAuthDelegate(_ authDelegate: AuthDelegate) {
             self.authDelegate = authDelegate
+        }
+
+        public func registerHostedTranslationDelegate(_ hostedTranslationDelegate: HostedTranslationDelegate) {
+            self.hostedTranslationDelegate = hostedTranslationDelegate
         }
 
         public func registerDatabaseDelegate(_ databaseDelegate: DatabaseDelegate) {

@@ -172,7 +172,7 @@ final class CoreDatabase {
 
         Logger.log(
             "Getting values at path \"\(path)\".",
-            domain: .database,
+            domain: .Networking.database,
             metadata: [self, #file, #function, #line]
         )
 
@@ -305,7 +305,7 @@ final class CoreDatabase {
 
         Logger.log(
             "Querying values at path \"\(path)\".",
-            domain: .database,
+            domain: .Networking.database,
             metadata: [self, #file, #function, #line]
         )
 
@@ -352,7 +352,7 @@ final class CoreDatabase {
 
         guard isEncodable(value) else {
             guard canComplete else { return }
-            completion(.invalidType(value: value, [self, #file, #function, #line]))
+            completion(.Networking.invalidType(value: value, [self, #file, #function, #line]))
             return
         }
 
@@ -363,7 +363,7 @@ final class CoreDatabase {
 
         Logger.log(
             "Setting value \"\(value)\" for key \"\(key)\".",
-            domain: .database,
+            domain: .Networking.database,
             metadata: [self, #file, #function, #line]
         )
 
@@ -407,7 +407,7 @@ final class CoreDatabase {
 
         guard data.values.allSatisfy({ isEncodable($0) }) else {
             guard canComplete else { return }
-            completion(.invalidType(value: data, [self, #file, #function, #line]))
+            completion(.Networking.invalidType(value: data, [self, #file, #function, #line]))
             return
         }
 
@@ -418,7 +418,7 @@ final class CoreDatabase {
 
         Logger.log(
             "Updating child values for key \"\(key)\" with \"\(data)\".",
-            domain: .database,
+            domain: .Networking.database,
             metadata: [self, #file, #function, #line]
         )
 

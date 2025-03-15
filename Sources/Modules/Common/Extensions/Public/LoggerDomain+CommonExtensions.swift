@@ -12,6 +12,9 @@ import Foundation
 import AppSubsystem
 
 public extension LoggerDomain {
-    static let database: LoggerDomain = .init("database")
-    static let storage: LoggerDomain = .init("storage")
+    enum Networking {
+        public static let database: LoggerDomain = .init("database")
+        public static let hostedTranslation: LoggerDomain = .init("hostedTranslation")
+        public static let storage: LoggerDomain = .init("storage")
+    }
 }

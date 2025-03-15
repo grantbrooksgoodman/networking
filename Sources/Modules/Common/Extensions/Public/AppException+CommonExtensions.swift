@@ -28,5 +28,11 @@ public extension AppException {
             public static let genericStorageError: AppException = .init("C81B") // TODO: Needs re-evaluation.
             public static let storageItemDoesNotExist: AppException = .init("9207")
         }
+
+        public enum Translation {
+            public static let exhaustedAvailablePlatforms: AppException = .init("C526")
+            public static let sameTranslationInputOutput: AppException = .init("6CEB")
+            public static let translationDerivationFailed: AppException = .init("43B4")
+        }
     }
 }

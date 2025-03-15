@@ -69,7 +69,7 @@ final class CoreStorage {
 
         Logger.log(
             "Uploading data to path \"\(metadata.filePath)\".",
-            domain: .storage,
+            domain: .Networking.storage,
             metadata: [self, #file, #function, #line]
         )
 
@@ -125,7 +125,7 @@ final class CoreStorage {
 
         Logger.log(
             "Deleting item at path \"\(path)\".",
-            domain: .storage,
+            domain: .Networking.storage,
             metadata: [self, #file, #function, #line]
         )
 
@@ -190,7 +190,7 @@ final class CoreStorage {
 
         Logger.log(
             "Downloading item at path \"\(path)\".",
-            domain: .storage,
+            domain: .Networking.storage,
             metadata: [self, #file, #function, #line]
         )
 
@@ -267,7 +267,7 @@ final class CoreStorage {
 
         Logger.log(
             "Checking item exists at path \"\(path)\".",
-            domain: .storage,
+            domain: .Networking.storage,
             metadata: [self, #file, #function, #line]
         )
 

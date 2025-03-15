@@ -13,6 +13,7 @@ public struct NetworkServices {
 
     public let auth: AuthDelegate
     public let database: DatabaseDelegate
+    public let hostedTranslation: HostedTranslationDelegate
     public let storage: StorageDelegate
 
     // MARK: - Init
@@ -20,10 +21,12 @@ public struct NetworkServices {
     public init(
         auth: AuthDelegate,
         database: DatabaseDelegate,
+        hostedTranslation: HostedTranslationDelegate,
         storage: StorageDelegate
     ) {
         self.auth = auth
         self.database = database
+        self.hostedTranslation = hostedTranslation
         self.storage = storage
     }
 }
