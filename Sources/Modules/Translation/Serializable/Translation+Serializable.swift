@@ -60,7 +60,6 @@ extension Translation: Serializable {
             let findArchivedTranslationResult = await Networking
                 .config
                 .hostedTranslationDelegate
-                .archiver
                 .findArchivedTranslation(
                     id: hash,
                     languagePair: data.languagePair

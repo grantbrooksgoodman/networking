@@ -22,7 +22,19 @@ struct HostedTranslationService: HostedTranslationDelegate {
 
     // MARK: - Properties
 
-    let archiver: HostedTranslationArchiverDelegate = HostedTranslationArchiver()
+    private let archiver = HostedTranslationArchiver()
+
+    // MARK: - Find Archived Translation
+
+    func findArchivedTranslation(
+        id inputValueEncodedHash: String,
+        languagePair: LanguagePair
+    ) async -> Callback<Translation, Exception> {
+        await archiver.findArchivedTranslation(
+            id: inputValueEncodedHash,
+            languagePair: languagePair
+        )
+    }
 
     // MARK: - Label String Resolution
 
@@ -55,7 +67,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
     func getTranslations(
         for inputs: [TranslationInput],
         languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?
     ) async -> Callback<[Translation], Exception> {
         if let exception = TranslationValidator.validate(
             inputs: inputs,
@@ -94,7 +106,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
     func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?
     ) async -> Callback<Translation, Exception> {
         if let exception = TranslationValidator.validate(
             inputs: [input],
@@ -146,7 +158,10 @@ struct HostedTranslationService: HostedTranslationDelegate {
                 languagePair: languagePair
             )
 
-            await archiver.addToHostedArchive(translation)
+            if let exception = await archiver.addToHostedArchive(translation) {
+                return .failure(exception)
+            }
+
             localTranslationArchiver.addValue(translation)
             return .success(translation)
         }
@@ -162,7 +177,10 @@ struct HostedTranslationService: HostedTranslationDelegate {
                 translation: translation,
                 metadata: [self, #file, #function, #line]
             ) != nil || translation.input.value == translation.output {
-                await archiver.removeArchivedTranslation(for: input, languagePair: languagePair)
+                if let exception = await archiver.removeArchivedTranslation(for: input, languagePair: languagePair) {
+                    return .failure(exception)
+                }
+
                 return await translate(
                     input,
                     with: languagePair,
@@ -219,9 +237,11 @@ struct HostedTranslationService: HostedTranslationDelegate {
                     return .failure(exception)
                 }
 
-                await archiver.addToHostedArchive(translation)
-                guard translation.input.value != translation.output else { return .success(translation) }
+                if let exception = await archiver.addToHostedArchive(translation) {
+                    return .failure(exception)
+                }
 
+                guard translation.input.value != translation.output else { return .success(translation) }
                 localTranslationArchiver.addValue(translation)
                 return .success(translation)
 
@@ -239,9 +259,11 @@ struct HostedTranslationService: HostedTranslationDelegate {
                     languagePair: languagePair
                 )
 
-                await archiver.addToHostedArchive(translation)
-                guard translation.input.value != translation.output else { return .success(translation) }
+                if let exception = await archiver.addToHostedArchive(translation) {
+                    return .failure(exception)
+                }
 
+                guard translation.input.value != translation.output else { return .success(translation) }
                 localTranslationArchiver.addValue(translation)
                 return .success(translation)
             }

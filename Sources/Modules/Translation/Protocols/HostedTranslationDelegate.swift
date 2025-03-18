@@ -13,12 +13,12 @@ import AlertKit
 import AppSubsystem
 import Translator
 
+// swiftlint:disable:next class_delegate_protocol
 public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate {
-    // MARK: - Properties
-
-    var archiver: HostedTranslationArchiverDelegate { get }
-
-    // MARK: - Methods
+    func findArchivedTranslation(
+        id inputValueEncodedHash: String,
+        languagePair: LanguagePair
+    ) async -> Callback<Translation, Exception>
 
     func getTranslations(
         for inputs: [TranslationInput],
