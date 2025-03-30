@@ -318,37 +318,47 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
             return true
         }
 
-        let timeout = Timeout(after: timeoutConfig.duration) {
+        var exceptions = [Exception]()
+        var translations = [Translation]()
+
+        func handleExceptionAndComplete() {
+            let exception = exceptions.compiledException ?? .init(metadata: [self, #file, #function, #line])
+            guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.unknown(exception.descriptor))) }
+
+            Logger.log(exception, domain: .Networking.hostedTranslation)
+            return completion(.success(translations))
+        }
+
+        func handleTimeout() {
             guard canComplete else { return }
-            guard timeoutConfig.returnsInputsOnFailure else {
-                completion(.failure(.timedOut))
-                return
-            }
-
-            Logger.log(
-                .timedOut([self, #file, #function, #line]),
-                domain: .Networking.hostedTranslation
-            )
-
-            completion(.success(inputs.map {
+            translations.append(contentsOf: inputs.filter { !translations.map(\.input).contains($0) }.map {
                 Translation(
                     input: $0,
                     output: $0.original.sanitized,
                     languagePair: languagePair
                 )
-            }))
+            })
+
+            guard translations.count == inputs.count else { return completion(.failure(.unknown("Mismatched ratio returned."))) }
+            guard exceptions.isEmpty else { return handleExceptionAndComplete() }
+            guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.timedOut)) }
+
+            Logger.log(.timedOut([self, #file, #function, #line]), domain: .Networking.hostedTranslation)
+            completion(.success(translations))
         }
 
-        Task {
-            var exceptions = [Exception]()
-            var translations = [Translation]()
+        var timeout = Timeout(after: timeoutConfig.duration) { handleTimeout() }
 
+        Task {
             for input in inputs {
                 // Purposefully ignoring HUD config argument so it can be handled here.
                 let translateResult = await translate(
                     input,
                     with: languagePair
                 )
+
+                timeout.cancel()
+                timeout = Timeout(after: timeoutConfig.duration) { handleTimeout() }
 
                 switch translateResult {
                 case let .success(translation):
@@ -365,19 +375,8 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
             }
 
             guard canComplete else { return }
-            guard translations.count == inputs.count else {
-                return completion(.failure(.unknown("Mismatched ratio returned.")))
-            }
-
-            guard exceptions.isEmpty else {
-                let exception = exceptions.compiledException ?? .init(metadata: [self, #file, #function, #line])
-                if timeoutConfig.returnsInputsOnFailure {
-                    Logger.log(exception, domain: .Networking.hostedTranslation)
-                    return completion(.success(translations))
-                }
-
-                return completion(.failure(.unknown(exception.descriptor)))
-            }
+            guard translations.count == inputs.count else { return completion(.failure(.unknown("Mismatched ratio returned."))) }
+            guard exceptions.isEmpty else { return handleExceptionAndComplete() }
 
             completion(.success(translations))
         }
