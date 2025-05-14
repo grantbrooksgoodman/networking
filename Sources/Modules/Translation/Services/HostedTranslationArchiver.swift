@@ -68,6 +68,7 @@ final class HostedTranslationArchiver {
         Logger.log(
             .init(
                 "Added retrieved translation to hosted archive.",
+                isReportable: false,
                 extraParams: ["ReferenceHostingKey": translation.reference.hostingKey],
                 metadata: [self, #file, #function, #line]
             ),

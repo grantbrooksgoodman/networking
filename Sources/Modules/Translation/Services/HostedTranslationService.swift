@@ -208,6 +208,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
             Logger.log(
                 .init(
                     "Translating text from \(sourceLanguageName) to \(targetLanguageName).",
+                    isReportable: false,
                     extraParams: ["InputValue": input.value,
                                   "LanguagePair": languagePair.string],
                     metadata: [self, #file, #function, #line]
