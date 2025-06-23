@@ -27,6 +27,10 @@ struct Auth: AuthDelegate {
         authID: String,
         verificationCode: String
     ) async -> Callback<String, Exception> {
+        guard Networking.isReadWriteEnabled else {
+            return .failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+        }
+
         guard isOnline else {
             return .failure(.internetConnectionOffline([self, #file, #function, #line]))
         }
@@ -51,6 +55,10 @@ struct Auth: AuthDelegate {
         internationalNumber: String,
         languageCode: String
     ) async -> Callback<String, Exception> {
+        guard Networking.isReadWriteEnabled else {
+            return .failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+        }
+
         guard isOnline else {
             return .failure(.internetConnectionOffline([self, #file, #function, #line]))
         }

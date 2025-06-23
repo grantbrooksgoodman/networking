@@ -106,6 +106,14 @@ public extension Exception {
             )
         }
 
+        static func readWriteAccessDisabled(_ metadata: [Any]) -> Exception {
+            .init(
+                "Read/write access has been disabled.",
+                isReportable: false,
+                metadata: [self, #file, #function, #line]
+            )
+        }
+
         static func translationFailsValidation(
             extraParams: [String: Any],
             _ metadata: [Any]

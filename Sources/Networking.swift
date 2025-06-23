@@ -31,6 +31,10 @@ public enum Networking {
         didInitialize = true
         DevModeService.insertAction(.switchEnvironmentAction, at: 0)
         DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 1)
+
+        Task.background {
+            await ReadWriteEnablementStatusService.shared.listenForReadWriteEnablementStatusChanges()
+        }
     }
 }
 

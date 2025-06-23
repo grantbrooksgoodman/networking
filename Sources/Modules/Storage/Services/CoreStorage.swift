@@ -47,6 +47,11 @@ final class CoreStorage {
         timeout duration: Duration,
         completion: @escaping (_ exception: Exception?) -> Void
     ) {
+        guard Networking.isReadWriteEnabled else {
+            completion(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return
+        }
+
         guard isOnline else {
             completion(.internetConnectionOffline([self, #file, #function, #line]))
             return
@@ -101,6 +106,11 @@ final class CoreStorage {
         timeout duration: Duration,
         completion: @escaping (_ exception: Exception?) -> Void
     ) {
+        guard Networking.isReadWriteEnabled else {
+            completion(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return
+        }
+
         guard isOnline else {
             completion(.internetConnectionOffline([self, #file, #function, #line]))
             return
@@ -157,6 +167,11 @@ final class CoreStorage {
         completion: @escaping (_ exception: Exception?) -> Void
     ) {
         let cacheStrategy = globalCacheStrategy ?? cacheStrategy
+        guard Networking.isReadWriteEnabled else {
+            completion(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return
+        }
+
         guard isOnline else {
             completion(.internetConnectionOffline([self, #file, #function, #line]))
             return
@@ -234,6 +249,11 @@ final class CoreStorage {
         completion: @escaping (_ callback: Callback<Bool, Exception>) -> Void
     ) {
         let cacheStrategy = globalCacheStrategy ?? cacheStrategy
+        guard Networking.isReadWriteEnabled else {
+            completion(.failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line])))
+            return
+        }
+
         guard isOnline else {
             completion(.failure(.internetConnectionOffline([self, #file, #function, #line])))
             return
