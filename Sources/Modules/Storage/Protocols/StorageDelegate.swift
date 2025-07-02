@@ -15,6 +15,13 @@ import AppSubsystem
 public protocol StorageDelegate {
     func clearStore()
 
+    func deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Exception?
+
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool,
@@ -28,6 +35,12 @@ public protocol StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Exception?
+
+    func enumerateEmptyDirectories(
+        startingAt path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Set<String>, Exception>
 
     func itemExists(
         at path: String,
@@ -48,6 +61,20 @@ public protocol StorageDelegate {
 }
 
 public extension StorageDelegate {
+    func deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10)
+    ) async -> Exception? {
+        await deleteAllItems(
+            at: path,
+            includeItemsInSubdirectories: includeItemsInSubdirectories,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool = true,
@@ -72,6 +99,18 @@ public extension StorageDelegate {
             to: localPath,
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+    }
+
+    func enumerateEmptyDirectories(
+        startingAt path: String,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10)
+    ) async -> Callback<Set<String>, Exception> {
+        await enumerateEmptyDirectories(
+            startingAt: path,
+            prependingEnvironment: prependingEnvironment,
             timeout: duration
         )
     }

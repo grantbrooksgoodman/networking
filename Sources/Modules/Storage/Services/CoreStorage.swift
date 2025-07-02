@@ -5,7 +5,7 @@
 //  Copyright © NEOTechnica Corporation. All rights reserved.
 //
 
-// swiftlint:disable type_body_length
+// swiftlint:disable file_length type_body_length
 
 /* Native */
 import Foundation
@@ -99,6 +99,59 @@ final class CoreStorage {
     }
 
     // MARK: - Deletion
+
+    func deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool,
+        prependingEnvironment: Bool,
+        timeout duration: Duration,
+        completion: @escaping (_ exception: Exception?) -> Void
+    ) {
+        guard Networking.isReadWriteEnabled else {
+            completion(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return
+        }
+
+        guard isOnline else {
+            completion(.internetConnectionOffline([self, #file, #function, #line]))
+            return
+        }
+
+        Networking.config.activityIndicatorDelegate.show()
+
+        var didComplete = false
+        var canComplete: Bool {
+            guard !didComplete else { return false }
+            didComplete = true
+            Networking.config.activityIndicatorDelegate.hide()
+            return true
+        }
+
+        let timeout = Timeout(after: duration) {
+            guard canComplete else { return }
+            completion(.timedOut([self, #file, #function, #line]))
+        }
+
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+
+        Logger.log(
+            "Deleting all items at path \"\(path)\".",
+            domain: .Networking.storage,
+            metadata: [self, #file, #function, #line]
+        )
+
+        storedDownloadItemResults[path] = nil
+        storedItemExistsResults[path] = nil
+
+        _deleteAllItems(
+            at: path,
+            includeItemsInSubdirectories: includeItemsInSubdirectories
+        ) { exception in
+            timeout.cancel()
+            guard canComplete else { return }
+            completion(exception)
+        }
+    }
 
     func deleteItem(
         at path: String,
@@ -239,7 +292,53 @@ final class CoreStorage {
         }
     }
 
-    // MARK: - Item Exists
+    // MARK: - Enumeration
+
+    func enumerateEmptyDirectories(
+        startingAt path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration,
+        completion: @escaping (Callback<Set<String>, Exception>) -> Void
+    ) {
+        guard Networking.isReadWriteEnabled else {
+            completion(.failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line])))
+            return
+        }
+
+        guard isOnline else {
+            completion(.failure(.internetConnectionOffline([self, #file, #function, #line])))
+            return
+        }
+
+        Networking.config.activityIndicatorDelegate.show()
+
+        var didComplete = false
+        var canComplete: Bool {
+            guard !didComplete else { return false }
+            didComplete = true
+            Networking.config.activityIndicatorDelegate.hide()
+            return true
+        }
+
+        let timeout = Timeout(after: duration) {
+            guard canComplete else { return }
+            completion(.failure(.timedOut([self, #file, #function, #line])))
+        }
+
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+
+        Logger.log(
+            "Enumerating empty directories, starting at \"\(path)\".",
+            domain: .Networking.storage,
+            metadata: [self, #file, #function, #line]
+        )
+
+        _enumerateEmptyDirectories(startingAt: path) { callback in
+            timeout.cancel()
+            guard canComplete else { return }
+            completion(callback)
+        }
+    }
 
     func itemExists(
         at path: String,
@@ -380,6 +479,135 @@ final class CoreStorage {
 
         return storedItemExistsResult
     }
+
+    private func _deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool = true,
+        completion: @escaping (_ exception: Exception?) -> Void
+    ) {
+        var didComplete = false
+        var canComplete: Bool {
+            guard !didComplete else { return false }
+            didComplete = true
+            return true
+        }
+
+        let dispatchGroup = DispatchGroup()
+        var exceptions = [Exception]()
+
+        storedDownloadItemResults[path] = nil
+        storedItemExistsResults[path] = nil
+
+        let directoryReference = firebaseStorage.child(path)
+        directoryReference.listAll { listAllResult in
+            switch listAllResult {
+            case let .success(storageListResult):
+                for itemReference in storageListResult.items {
+                    Logger.log(
+                        "Deleting item at path \"\(itemReference.fullPath)\".",
+                        domain: .Networking.storage,
+                        metadata: [self, #file, #function, #line]
+                    )
+
+                    self.storedDownloadItemResults[itemReference.fullPath] = nil
+                    self.storedItemExistsResults[itemReference.fullPath] = nil
+
+                    dispatchGroup.enter()
+                    itemReference.delete { error in
+                        defer { dispatchGroup.leave() }
+                        guard let error else { return }
+                        exceptions.append(.init(error, metadata: [self, #file, #function, #line]))
+                    }
+                }
+
+                guard includeItemsInSubdirectories else {
+                    guard canComplete else { return }
+                    return completion(exceptions.compiledException)
+                }
+
+                for subfolder in storageListResult.prefixes {
+                    dispatchGroup.enter()
+                    self._deleteAllItems(at: subfolder.fullPath) { exception in
+                        defer { dispatchGroup.leave() }
+                        guard let exception else { return }
+                        exceptions.append(exception)
+                    }
+                }
+
+            case let .failure(error):
+                guard canComplete else { return }
+                completion(.init(error, metadata: [self, #file, #function, #line]))
+            }
+        }
+
+        dispatchGroup.notify(queue: .main) {
+            guard canComplete else { return }
+            completion(exceptions.compiledException)
+        }
+    }
+
+    private func _enumerateEmptyDirectories(
+        startingAt path: String,
+        with emptyDirectories: Set<String> = .init(),
+        completion: @escaping (Callback<Set<String>, Exception>) -> Void
+    ) {
+        var didComplete = false
+        var canComplete: Bool {
+            guard !didComplete else { return false }
+            didComplete = true
+            return true
+        }
+
+        let dispatchGroup = DispatchGroup()
+        dispatchGroup.enter()
+
+        var emptyDirectories = emptyDirectories
+        var exceptions = [Exception]()
+
+        let directoryReference = firebaseStorage.child(path)
+        directoryReference.listAll { listAllResult in
+            defer { dispatchGroup.leave() }
+
+            switch listAllResult {
+            case let .success(storageListResult):
+                if storageListResult.items.isEmpty,
+                   storageListResult.prefixes.isEmpty {
+                    emptyDirectories.insert(path)
+                }
+
+                for subfolder in storageListResult.prefixes {
+                    dispatchGroup.enter()
+                    self._enumerateEmptyDirectories(
+                        startingAt: subfolder.fullPath,
+                        with: emptyDirectories
+                    ) { callback in
+                        defer { dispatchGroup.leave() }
+
+                        switch callback {
+                        case let .success(emptySubdirectories):
+                            emptySubdirectories.forEach { emptyDirectories.insert($0) }
+
+                        case let .failure(exception):
+                            exceptions.append(exception)
+                        }
+                    }
+                }
+
+            case let .failure(error):
+                guard canComplete else { return }
+                completion(.failure(.init(error, metadata: [self, #file, #function, #line])))
+            }
+        }
+
+        dispatchGroup.notify(queue: .main) {
+            guard canComplete else { return }
+            if let exception = exceptions.compiledException {
+                completion(.failure(exception))
+            } else {
+                completion(.success(emptyDirectories))
+            }
+        }
+    }
 }
 
-// swiftlint:enable type_body_length
+// swiftlint:enable file_length type_body_length

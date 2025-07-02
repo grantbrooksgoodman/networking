@@ -30,7 +30,7 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreStorage.upload(
                 data,
                 metadata: metadata,
@@ -44,12 +44,30 @@ struct Storage: StorageDelegate {
 
     // MARK: - Deletion
 
+    func deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Exception? {
+        await withCheckedContinuation { continuation in
+            coreStorage.deleteAllItems(
+                at: path,
+                includeItemsInSubdirectories: includeItemsInSubdirectories,
+                prependingEnvironment: prependingEnvironment,
+                timeout: duration
+            ) { exception in
+                continuation.resume(returning: exception)
+            }
+        }
+    }
+
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreStorage.deleteItem(
                 at: path,
                 prependingEnvironment: prependingEnvironment,
@@ -69,7 +87,7 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Exception? {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreStorage.downloadItem(
                 at: path,
                 to: localPath,
@@ -82,7 +100,23 @@ struct Storage: StorageDelegate {
         }
     }
 
-    // MARK: - Item Exists
+    // MARK: - Enumeration
+
+    func enumerateEmptyDirectories(
+        startingAt path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Set<String>, Exception> {
+        await withCheckedContinuation { continuation in
+            coreStorage.enumerateEmptyDirectories(
+                startingAt: path,
+                prependingEnvironment: prependingEnvironment,
+                timeout: duration
+            ) { callback in
+                continuation.resume(returning: callback)
+            }
+        }
+    }
 
     func itemExists(
         at path: String,
@@ -90,7 +124,7 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Bool, Exception> {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreStorage.itemExists(
                 at: path,
                 prependingEnvironment: prependingEnvironment,

@@ -52,7 +52,7 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Any, Exception> {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreDatabase.getValues(
                 at: path,
                 prependingEnvironment: prependingEnvironment,
@@ -71,7 +71,7 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Any, Exception> {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreDatabase.queryValues(
                 at: path,
                 strategy: strategy,
@@ -92,7 +92,7 @@ struct Database: DatabaseDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreDatabase.setValue(
                 value,
                 forKey: key,
@@ -110,7 +110,7 @@ struct Database: DatabaseDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             coreDatabase.updateChildValues(
                 forKey: key,
                 with: data,
