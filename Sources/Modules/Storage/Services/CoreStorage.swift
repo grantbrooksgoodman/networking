@@ -117,8 +117,6 @@ final class CoreStorage {
             return
         }
 
-        Networking.config.activityIndicatorDelegate.show()
-
         var didComplete = false
         var canComplete: Bool {
             guard !didComplete else { return false }
@@ -143,13 +141,15 @@ final class CoreStorage {
         storedDownloadItemResults[path] = nil
         storedItemExistsResults[path] = nil
 
-        _deleteAllItems(
-            at: path,
-            includeItemsInSubdirectories: includeItemsInSubdirectories
-        ) { exception in
+        Task {
+            let deleteAllItemsResult = await _deleteAllItems(
+                at: path,
+                includeItemsInSubdirectories: includeItemsInSubdirectories
+            )
+
             timeout.cancel()
             guard canComplete else { return }
-            completion(exception)
+            completion(deleteAllItemsResult)
         }
     }
 
@@ -310,8 +310,6 @@ final class CoreStorage {
             return
         }
 
-        Networking.config.activityIndicatorDelegate.show()
-
         var didComplete = false
         var canComplete: Bool {
             guard !didComplete else { return false }
@@ -333,10 +331,12 @@ final class CoreStorage {
             metadata: [self, #file, #function, #line]
         )
 
-        _enumerateEmptyDirectories(startingAt: path) { callback in
+        Task {
+            let enumerateEmptyDirectoriesResult = await _enumerateEmptyDirectories(startingAt: path)
+
             timeout.cancel()
             guard canComplete else { return }
-            completion(callback)
+            completion(enumerateEmptyDirectoriesResult)
         }
     }
 
@@ -480,76 +480,19 @@ final class CoreStorage {
         return storedItemExistsResult
     }
 
-    private func _deleteAllItems(
-        at path: String,
-        includeItemsInSubdirectories: Bool = true,
-        completion: @escaping (_ exception: Exception?) -> Void
-    ) {
-        var didComplete = false
-        var canComplete: Bool {
-            guard !didComplete else { return false }
-            didComplete = true
-            return true
-        }
-
-        let dispatchGroup = DispatchGroup()
-        var exceptions = [Exception]()
-
-        storedDownloadItemResults[path] = nil
-        storedItemExistsResults[path] = nil
-
-        let directoryReference = firebaseStorage.child(path)
-        directoryReference.listAll { listAllResult in
-            switch listAllResult {
-            case let .success(storageListResult):
-                for itemReference in storageListResult.items {
-                    Logger.log(
-                        "Deleting item at path \"\(itemReference.fullPath)\".",
-                        domain: .Networking.storage,
-                        metadata: [self, #file, #function, #line]
-                    )
-
-                    self.storedDownloadItemResults[itemReference.fullPath] = nil
-                    self.storedItemExistsResults[itemReference.fullPath] = nil
-
-                    dispatchGroup.enter()
-                    itemReference.delete { error in
-                        defer { dispatchGroup.leave() }
-                        guard let error else { return }
-                        exceptions.append(.init(error, metadata: [self, #file, #function, #line]))
-                    }
-                }
-
-                guard includeItemsInSubdirectories else {
-                    guard canComplete else { return }
-                    return completion(exceptions.compiledException)
-                }
-
-                for subfolder in storageListResult.prefixes {
-                    dispatchGroup.enter()
-                    self._deleteAllItems(at: subfolder.fullPath) { exception in
-                        defer { dispatchGroup.leave() }
-                        guard let exception else { return }
-                        exceptions.append(exception)
-                    }
-                }
-
-            case let .failure(error):
-                guard canComplete else { return }
-                completion(.init(error, metadata: [self, #file, #function, #line]))
+    private func getDirectoryListing(
+        at path: String
+    ) async -> Callback<DirectoryListing, Exception> {
+        await withCheckedContinuation { continuation in
+            getDirectoryListing(at: path) { callback in
+                continuation.resume(returning: callback)
             }
-        }
-
-        dispatchGroup.notify(queue: .main) {
-            guard canComplete else { return }
-            completion(exceptions.compiledException)
         }
     }
 
-    private func _enumerateEmptyDirectories(
-        startingAt path: String,
-        with emptyDirectories: Set<String> = .init(),
-        completion: @escaping (Callback<Set<String>, Exception>) -> Void
+    private func getDirectoryListing(
+        at path: String,
+        completion: @escaping (Callback<DirectoryListing, Exception>) -> Void
     ) {
         var didComplete = false
         var canComplete: Bool {
@@ -558,55 +501,108 @@ final class CoreStorage {
             return true
         }
 
-        let dispatchGroup = DispatchGroup()
-        dispatchGroup.enter()
-
-        var emptyDirectories = emptyDirectories
-        var exceptions = [Exception]()
-
         let directoryReference = firebaseStorage.child(path)
         directoryReference.listAll { listAllResult in
-            defer { dispatchGroup.leave() }
-
             switch listAllResult {
             case let .success(storageListResult):
-                if storageListResult.items.isEmpty,
-                   storageListResult.prefixes.isEmpty {
-                    emptyDirectories.insert(path)
-                }
-
-                for subfolder in storageListResult.prefixes {
-                    dispatchGroup.enter()
-                    self._enumerateEmptyDirectories(
-                        startingAt: subfolder.fullPath,
-                        with: emptyDirectories
-                    ) { callback in
-                        defer { dispatchGroup.leave() }
-
-                        switch callback {
-                        case let .success(emptySubdirectories):
-                            emptySubdirectories.forEach { emptyDirectories.insert($0) }
-
-                        case let .failure(exception):
-                            exceptions.append(exception)
-                        }
-                    }
-                }
+                guard canComplete else { return }
+                completion(.success(.init(storageListResult)))
 
             case let .failure(error):
                 guard canComplete else { return }
                 completion(.failure(.init(error, metadata: [self, #file, #function, #line])))
             }
         }
+    }
 
-        dispatchGroup.notify(queue: .main) {
-            guard canComplete else { return }
-            if let exception = exceptions.compiledException {
-                completion(.failure(exception))
-            } else {
-                completion(.success(emptyDirectories))
+    private func _deleteAllItems(
+        at path: String,
+        includeItemsInSubdirectories: Bool = true
+    ) async -> Exception? {
+        var exceptions = [Exception]()
+
+        storedDownloadItemResults[path] = nil
+        storedItemExistsResults[path] = nil
+
+        Networking.config.activityIndicatorDelegate.show()
+        let getDirectoryListingResult = await getDirectoryListing(at: path)
+
+        switch getDirectoryListingResult {
+        case let .success(directoryListing):
+            for filePath in directoryListing.filePaths {
+                Logger.log(
+                    "Deleting item at path \"\(filePath)\".",
+                    domain: .Networking.storage,
+                    metadata: [self, #file, #function, #line]
+                )
+
+                storedDownloadItemResults[filePath] = nil
+                storedItemExistsResults[filePath] = nil
+
+                firebaseStorage.child(filePath).delete { error in
+                    guard let error else { return }
+                    exceptions.append(.init(error, metadata: [self, #file, #function, #line]))
+                }
             }
+
+            guard includeItemsInSubdirectories else { return exceptions.compiledException }
+            for subdirectory in directoryListing.subdirectories {
+                if let exception = await _deleteAllItems(
+                    at: subdirectory,
+                    includeItemsInSubdirectories: includeItemsInSubdirectories
+                ) {
+                    exceptions.append(exception)
+                }
+            }
+
+            return exceptions.compiledException
+
+        case let .failure(exception):
+            return exception
         }
+    }
+
+    private func _enumerateEmptyDirectories(
+        startingAt path: String,
+        with emptyDirectories: Set<String> = .init()
+    ) async -> Callback<Set<String>, Exception> {
+        var emptyDirectories = emptyDirectories
+        var exceptions = [Exception]()
+
+        Networking.config.activityIndicatorDelegate.show()
+        let getDirectoryListingResult = await getDirectoryListing(at: path)
+
+        switch getDirectoryListingResult {
+        case let .success(directoryListing):
+            if directoryListing.filePaths.isEmpty,
+               directoryListing.subdirectories.isEmpty {
+                emptyDirectories.insert(path)
+            }
+
+            for subdirectory in directoryListing.subdirectories {
+                let enumerateEmptySubdirectoriesResult = await _enumerateEmptyDirectories(
+                    startingAt: subdirectory,
+                    with: emptyDirectories
+                )
+
+                switch enumerateEmptySubdirectoriesResult {
+                case let .success(emptySubdirectories):
+                    emptyDirectories.formUnion(emptySubdirectories)
+
+                case let .failure(exception):
+                    exceptions.append(exception)
+                }
+            }
+
+        case let .failure(exception):
+            return .failure(exception)
+        }
+
+        if let exception = exceptions.compiledException {
+            return .failure(exception)
+        }
+
+        return .success(emptyDirectories)
     }
 }
 
