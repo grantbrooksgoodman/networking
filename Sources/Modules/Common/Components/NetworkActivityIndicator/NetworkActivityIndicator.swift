@@ -15,7 +15,6 @@ import AppSubsystem
 struct NetworkActivityIndicator: View {
     // MARK: - Constants Accessors
 
-    private typealias Colors = AppConstants.Colors.NetworkActivityIndicator
     private typealias Floats = AppConstants.CGFloats.NetworkActivityIndicator
 
     // MARK: - Properties
@@ -34,7 +33,7 @@ struct NetworkActivityIndicator: View {
 
     var body: some View {
         Circle()
-            .foregroundStyle(Color.accent)
+            .foregroundStyle(viewModel.backgroundColor)
             .padding(.all, Floats.padding)
             .frame(
                 width: Floats.frameWidth,
@@ -43,7 +42,7 @@ struct NetworkActivityIndicator: View {
             .overlay {
                 ProgressView()
                     .dynamicTypeSize(.large)
-                    .tint(Colors.progressViewTint)
+                    .tint(viewModel.progressViewTintColor)
             }
             .offset(y: viewModel.yOffset)
             .opacity(viewModel.isVisible ? 1 : 0)

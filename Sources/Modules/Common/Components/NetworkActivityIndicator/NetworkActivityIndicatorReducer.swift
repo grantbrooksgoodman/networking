@@ -7,6 +7,7 @@
 
 /* Native */
 import Foundation
+import SwiftUI
 
 /* Proprietary */
 import AppSubsystem
@@ -40,6 +41,16 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
         var isVisible = false
         var yOffset: CGFloat = Floats.hiddenYOffset
+
+        /* MARK: Computed Properties */
+
+        var backgroundColor: Color {
+            Networking.config.activityIndicatorDelegate.backgroundColor
+        }
+
+        var progressViewTintColor: Color {
+            Networking.config.activityIndicatorDelegate.progressViewTintColor
+        }
     }
 
     // MARK: - Reduce

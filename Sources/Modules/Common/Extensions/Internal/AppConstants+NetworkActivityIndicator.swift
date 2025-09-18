@@ -25,11 +25,3 @@ extension AppConstants.CGFloats {
         static let padding: CGFloat = 5
     }
 }
-
-// MARK: - Color
-
-extension AppConstants.Colors {
-    enum NetworkActivityIndicator {
-        static let progressViewTint: Color = .white
-    }
-}
