@@ -21,7 +21,7 @@ public extension Exception {
         ) -> Exception {
             .init(
                 "Decoding failed.",
-                extraParams: ["Data": data],
+                userInfo: ["Data": data],
                 metadata: metadata
             )
         }
@@ -32,7 +32,7 @@ public extension Exception {
         ) -> Exception {
             .init(
                 "Serialized type values must conform to NSArray, NSDictionary, NSNull, NSNumber, or NSString.",
-                extraParams: ["Value": value],
+                userInfo: ["Value": value],
                 metadata: metadata
             )
         }
@@ -43,7 +43,7 @@ public extension Exception {
         ) -> Exception {
             return .init(
                 "Type value must be serialized.",
-                extraParams: ["Data": data],
+                userInfo: ["Data": data],
                 metadata: metadata
             )
         }
@@ -54,19 +54,19 @@ public extension Exception {
         ) -> Exception {
             .init(
                 "The specified serialization key is not updatable.",
-                extraParams: ["Key": key],
+                userInfo: ["Key": key],
                 metadata: metadata
             )
         }
 
         public static func typecastFailed(
             _ typeName: String? = nil,
-            extraParams: [String: Any]? = nil,
+            userInfo: [String: Any]? = nil,
             metadata: [Any]
         ) -> Exception {
             .init(
                 "Failed to typecast values \(typeName == nil ? "." : "to \(typeName!).")",
-                extraParams: extraParams,
+                userInfo: userInfo,
                 metadata: metadata
             )
         }
@@ -77,7 +77,7 @@ public extension Exception {
         ) -> Exception {
             .init(
                 "Type mismatch for serialization key.",
-                extraParams: ["Key": key],
+                userInfo: ["Key": key],
                 metadata: metadata
             )
         }
@@ -92,9 +92,9 @@ public extension Exception {
             func exception(_ descriptor: String) -> Exception {
                 .init(
                     descriptor,
-                    extraParams: [
+                    userInfo: [
                         "Path": path,
-                        "StaticHashlet": "9207",
+                        "StaticErrorCode": "9207",
                     ],
                     metadata: metadata
                 )
@@ -111,23 +111,23 @@ public extension Exception {
         }
 
         static func inputsFailValidation(
-            extraParams: [String: Any],
+            userInfo: [String: Any],
             _ metadata: [Any]
         ) -> Exception {
             .init(
                 "Input fails validation.",
-                extraParams: extraParams,
+                userInfo: userInfo,
                 metadata: metadata
             )
         }
 
         static func languagePairFailsValidation(
-            extraParams: [String: Any],
+            userInfo: [String: Any],
             _ metadata: [Any]
         ) -> Exception {
             .init(
                 "Language pair fails validation.",
-                extraParams: extraParams,
+                userInfo: userInfo,
                 metadata: metadata
             )
         }
@@ -141,12 +141,12 @@ public extension Exception {
         }
 
         static func translationFailsValidation(
-            extraParams: [String: Any],
+            userInfo: [String: Any],
             _ metadata: [Any]
         ) -> Exception {
             .init(
                 "Translation fails validation.",
-                extraParams: extraParams,
+                userInfo: userInfo,
                 metadata: metadata
             )
         }

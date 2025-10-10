@@ -69,7 +69,7 @@ final class HostedTranslationArchiver {
             .init(
                 "Added retrieved translation to hosted archive.",
                 isReportable: false,
-                extraParams: ["ReferenceHostingKey": translation.reference.hostingKey],
+                userInfo: ["ReferenceHostingKey": translation.reference.hostingKey],
                 metadata: [self, #file, #function, #line]
             ),
             domain: .Networking.hostedTranslation
@@ -110,7 +110,7 @@ final class HostedTranslationArchiver {
             languagePair: languagePair,
             metadata: [self, #file, #function, #line]
         ) {
-            return .failure(exception.appending(extraParams: commonParams))
+            return .failure(exception.appending(userInfo: commonParams))
         }
 
         let getValuesResult = await database.getValues(at: path)
@@ -120,10 +120,10 @@ final class HostedTranslationArchiver {
             guard let string = values as? String else {
                 let exception: Exception = .Networking.typecastFailed(
                     "string",
-                    extraParams: ["Value": values],
+                    userInfo: ["Value": values],
                     metadata: [self, #file, #function, #line]
                 )
-                return .failure(exception.appending(extraParams: commonParams))
+                return .failure(exception.appending(userInfo: commonParams))
             }
 
             guard let components = string.decodedTranslationComponents else {
@@ -131,7 +131,7 @@ final class HostedTranslationArchiver {
                     .Networking.decodingFailed(
                         data: string,
                         [self, #file, #function, #line]
-                    ).appending(extraParams: commonParams)
+                    ).appending(userInfo: commonParams)
                 )
             }
 
@@ -144,7 +144,7 @@ final class HostedTranslationArchiver {
             )
 
         case let .failure(exception):
-            return .failure(exception.appending(extraParams: commonParams))
+            return .failure(exception.appending(userInfo: commonParams))
         }
     }
 
@@ -203,7 +203,7 @@ final class HostedTranslationArchiver {
                 .init(
                     "Successfully derived translation from existing data.",
                     isReportable: false,
-                    extraParams: [
+                    userInfo: [
                         "IntermediateLanguagePair": archivedLanguagePair.string,
                         "SynthesisLanguagePair": "\(archivedLanguagePair.to)-\(originalLanguagePair.to)",
                         "TargetLanguagePair": originalLanguagePair.string,

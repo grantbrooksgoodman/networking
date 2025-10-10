@@ -290,7 +290,7 @@ final class CoreDatabase {
                     guard canResume else { return }
                     return continuation.resume(returning: .failure(.init(
                         "No value exists at the specified key path.",
-                        extraParams: ["Path": path],
+                        userInfo: ["Path": path],
                         metadata: [self, #file, #function, #line]
                     )))
                 }
@@ -369,7 +369,7 @@ final class CoreDatabase {
                   let value = getDataResult.value else {
                 return .failure(.init(
                     "No value exists at the specified key path.",
-                    extraParams: ["Path": path],
+                    userInfo: ["Path": path],
                     metadata: [self, #file, #function, #line]
                 ))
             }

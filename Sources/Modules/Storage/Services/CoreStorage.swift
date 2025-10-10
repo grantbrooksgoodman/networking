@@ -417,7 +417,7 @@ final class CoreStorage {
                 guard let fileName = filePath.fileName else {
                     exceptions.append(.init(
                         "Failed to resolve file name.",
-                        extraParams: ["FilePath": filePath],
+                        userInfo: ["FilePath": filePath],
                         metadata: [self, #file, #function, #line]
                     ))
                     continue

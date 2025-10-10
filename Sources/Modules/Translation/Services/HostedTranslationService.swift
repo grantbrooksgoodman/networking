@@ -209,8 +209,8 @@ struct HostedTranslationService: HostedTranslationDelegate {
                 .init(
                     "Translating text from \(sourceLanguageName) to \(targetLanguageName).",
                     isReportable: false,
-                    extraParams: ["InputValue": input.value,
-                                  "LanguagePair": languagePair.string],
+                    userInfo: ["InputValue": input.value,
+                               "LanguagePair": languagePair.string],
                     metadata: [self, #file, #function, #line]
                 ),
                 domain: .Networking.hostedTranslation

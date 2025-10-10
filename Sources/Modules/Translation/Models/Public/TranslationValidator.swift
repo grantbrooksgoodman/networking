@@ -28,7 +28,7 @@ public enum TranslationValidator {
 
         typealias Exceptions = Exception.Networking
 
-        var extraParams: [String: String] {
+        var userInfo: [String: String] {
             var parameters = [String: String]()
 
             if let inputs {
@@ -48,19 +48,19 @@ public enum TranslationValidator {
 
         if let inputs {
             guard inputs.isWellFormed else {
-                return Exceptions.inputsFailValidation(extraParams: extraParams, metadata)
+                return Exceptions.inputsFailValidation(userInfo: userInfo, metadata)
             }
         }
 
         if let languagePair {
             guard languagePair.isWellFormed else {
-                return Exceptions.languagePairFailsValidation(extraParams: extraParams, metadata)
+                return Exceptions.languagePairFailsValidation(userInfo: userInfo, metadata)
             }
         }
 
         if let translation {
             guard translation.isWellFormed else {
-                return Exceptions.translationFailsValidation(extraParams: extraParams, metadata)
+                return Exceptions.translationFailsValidation(userInfo: userInfo, metadata)
             }
         }
 
