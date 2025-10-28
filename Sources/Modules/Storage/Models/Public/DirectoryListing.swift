@@ -11,11 +11,11 @@ import Foundation
 /* 3rd-party */
 import FirebaseStorage
 
-struct DirectoryListing {
+public struct DirectoryListing {
     // MARK: - Properties
 
-    let filePaths: Set<String>
-    let subdirectories: Set<String>
+    public let filePaths: Set<String>
+    public let subdirectories: Set<String>
 
     // MARK: - Init
 

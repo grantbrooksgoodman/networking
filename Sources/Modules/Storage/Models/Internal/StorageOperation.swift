@@ -35,6 +35,11 @@ enum StorageOperation {
         startingAt: String
     )
 
+    case getDirectoryListing(
+        atPath: String,
+        firstResultOnly: Bool
+    )
+
     case itemExists(
         asItemType: HostedItemType,
         atPath: String,
