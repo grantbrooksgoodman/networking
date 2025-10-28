@@ -46,7 +46,7 @@ public enum CoreDatabaseStore {
         Logger.log(
             "Returning stored value for data at path \"\(key)\".",
             domain: .caches,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         return storedDataSample.data
@@ -139,13 +139,13 @@ final class CoreDatabase {
     ) {
         guard Networking.isReadWriteEnabled else {
             return completion(.failure(
-                .Networking.readWriteAccessDisabled([self, #file, #function, #line])
+                .Networking.readWriteAccessDisabled(.init(sender: self))
             ))
         }
 
         guard isOnline else {
             return completion(.failure(
-                .internetConnectionOffline([self, #file, #function, #line])
+                .internetConnectionOffline(metadata: .init(sender: self))
             ))
         }
 
@@ -162,7 +162,7 @@ final class CoreDatabase {
         let timeout = Timeout(after: duration) {
             guard canComplete else { return }
             completion(.failure(
-                .timedOut([self, #file, #function, #line])
+                .timedOut(metadata: .init(sender: self))
             ))
         }
 
@@ -247,7 +247,7 @@ final class CoreDatabase {
         Logger.log(
             "Getting values at path \"\(path)\".",
             domain: .Networking.database,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         let getValuesStartDate = Date.now
@@ -291,7 +291,7 @@ final class CoreDatabase {
                     return continuation.resume(returning: .failure(.init(
                         "No value exists at the specified key path.",
                         userInfo: ["Path": path],
-                        metadata: [self, #file, #function, #line]
+                        metadata: .init(sender: self)
                     )))
                 }
 
@@ -301,7 +301,7 @@ final class CoreDatabase {
                 guard canResume else { return }
                 continuation.resume(returning: .failure(.init(
                     error,
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 )))
             }
         }
@@ -322,7 +322,7 @@ final class CoreDatabase {
         Logger.log(
             "Querying values at path \"\(path)\".",
             domain: .Networking.database,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         let queryValuesStartDate = Date.now
@@ -370,13 +370,13 @@ final class CoreDatabase {
                 return .failure(.init(
                     "No value exists at the specified key path.",
                     userInfo: ["Path": path],
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 ))
             }
 
             return .success(value)
         } catch {
-            return .failure(.init(error, metadata: [self, #file, #function, #line]))
+            return .failure(.init(error, metadata: .init(sender: self)))
         }
     }
 
@@ -389,14 +389,14 @@ final class CoreDatabase {
         guard isEncodable(value) else {
             return .failure(.Networking.invalidType(
                 value: value,
-                [self, #file, #function, #line]
+                .init(sender: self)
             ))
         }
 
         Logger.log(
             "Setting value \"\(value)\" for key \"\(key)\".",
             domain: .Networking.database,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         if let exception = await _setValue(value, forKey: key) {
@@ -422,7 +422,7 @@ final class CoreDatabase {
             _ = try await firebaseDatabase.child(key).setValue(value)
             return nil
         } catch {
-            return .init(error, metadata: [self, #file, #function, #line])
+            return .init(error, metadata: .init(sender: self))
         }
     }
 
@@ -433,14 +433,14 @@ final class CoreDatabase {
         guard data.values.allSatisfy({ isEncodable($0) }) else {
             return .failure(.Networking.invalidType(
                 value: data,
-                [self, #file, #function, #line]
+                .init(sender: self)
             ))
         }
 
         Logger.log(
             "Updating child values for key \"\(key)\" with \"\(data)\".",
             domain: .Networking.database,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         if let exception = await _updateChildValues(
@@ -469,7 +469,7 @@ final class CoreDatabase {
             _ = try await firebaseDatabase.child(key).updateChildValues(data)
             return nil
         } catch {
-            return .init(error, metadata: [self, #file, #function, #line])
+            return .init(error, metadata: .init(sender: self))
         }
     }
 

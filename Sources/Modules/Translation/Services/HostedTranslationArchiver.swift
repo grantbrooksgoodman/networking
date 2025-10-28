@@ -32,7 +32,7 @@ final class HostedTranslationArchiver {
                 return Logger.log(
                     "Populated translation data snapshot.",
                     domain: .Networking.hostedTranslation,
-                    metadata: [self, #file, #function, #line]
+                    sender: self
                 )
             }
 
@@ -45,7 +45,7 @@ final class HostedTranslationArchiver {
     func addToHostedArchive(_ translation: Translation) async -> Exception? {
         if let exception = TranslationValidator.validate(
             translation: translation,
-            metadata: [self, #file, #function, #line]
+            metadata: .init(sender: self)
         ) {
             return exception
         }
@@ -54,7 +54,7 @@ final class HostedTranslationArchiver {
               let referenceValue = translation.reference.type.value else {
             return .init(
                 "Translation language pair is idempotent; ineligible for hosted archive.",
-                metadata: [self, #file, #function, #line]
+                metadata: .init(sender: self)
             )
         }
 
@@ -70,7 +70,7 @@ final class HostedTranslationArchiver {
                 "Added retrieved translation to hosted archive.",
                 isReportable: false,
                 userInfo: ["ReferenceHostingKey": translation.reference.hostingKey],
-                metadata: [self, #file, #function, #line]
+                metadata: .init(sender: self)
             ),
             domain: .Networking.hostedTranslation
         )
@@ -108,7 +108,7 @@ final class HostedTranslationArchiver {
 
         if let exception = TranslationValidator.validate(
             languagePair: languagePair,
-            metadata: [self, #file, #function, #line]
+            metadata: .init(sender: self)
         ) {
             return .failure(exception.appending(userInfo: commonParams))
         }
@@ -121,7 +121,7 @@ final class HostedTranslationArchiver {
                 let exception: Exception = .Networking.typecastFailed(
                     "string",
                     userInfo: ["Value": values],
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 )
                 return .failure(exception.appending(userInfo: commonParams))
             }
@@ -130,7 +130,7 @@ final class HostedTranslationArchiver {
                 return .failure(
                     .Networking.decodingFailed(
                         data: string,
-                        [self, #file, #function, #line]
+                        .init(sender: self)
                     ).appending(userInfo: commonParams)
                 )
             }
@@ -208,9 +208,10 @@ final class HostedTranslationArchiver {
                         "SynthesisLanguagePair": "\(archivedLanguagePair.to)-\(originalLanguagePair.to)",
                         "TargetLanguagePair": originalLanguagePair.string,
                     ],
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 ),
-                domain: .Networking.hostedTranslation
+                domain: .Networking.hostedTranslation,
+                with: .toastInPrerelease(style: .success)
             )
 
             return .success(derivedTranslation)
@@ -218,7 +219,7 @@ final class HostedTranslationArchiver {
 
         return .failure(.init(
             "Failed to derive translation from existing data.",
-            metadata: [self, #file, #function, #line]
+            metadata: .init(sender: self)
         ))
     }
 
@@ -235,7 +236,7 @@ final class HostedTranslationArchiver {
                 isPopulatingTranslationDataSample = false
                 return .Networking.typecastFailed(
                     "dictionary",
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 )
             }
 

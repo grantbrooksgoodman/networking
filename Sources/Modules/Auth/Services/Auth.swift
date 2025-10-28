@@ -28,11 +28,11 @@ struct Auth: AuthDelegate {
         verificationCode: String
     ) async -> Callback<String, Exception> {
         guard Networking.isReadWriteEnabled else {
-            return .failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return .failure(.Networking.readWriteAccessDisabled(.init(sender: self)))
         }
 
         guard isOnline else {
-            return .failure(.internetConnectionOffline([self, #file, #function, #line]))
+            return .failure(.internetConnectionOffline(metadata: .init(sender: self)))
         }
 
         Networking.config.activityIndicatorDelegate.show()
@@ -45,7 +45,7 @@ struct Auth: AuthDelegate {
             return .success(signInResult.user.uid)
         } catch {
             Networking.config.activityIndicatorDelegate.hide()
-            return .failure(.init(error, metadata: [self, #file, #function, #line]))
+            return .failure(.init(error, metadata: .init(sender: self)))
         }
     }
 
@@ -56,11 +56,11 @@ struct Auth: AuthDelegate {
         languageCode: String
     ) async -> Callback<String, Exception> {
         guard Networking.isReadWriteEnabled else {
-            return .failure(.Networking.readWriteAccessDisabled([self, #file, #function, #line]))
+            return .failure(.Networking.readWriteAccessDisabled(.init(sender: self)))
         }
 
         guard isOnline else {
-            return .failure(.internetConnectionOffline([self, #file, #function, #line]))
+            return .failure(.internetConnectionOffline(metadata: .init(sender: self)))
         }
 
         Networking.config.activityIndicatorDelegate.show()
@@ -73,7 +73,7 @@ struct Auth: AuthDelegate {
             return .success(authID)
         } catch {
             Networking.config.activityIndicatorDelegate.hide()
-            return .failure(.init(error, metadata: [self, #file, #function, #line]))
+            return .failure(.init(error, metadata: .init(sender: self)))
         }
     }
 }

@@ -94,7 +94,7 @@ public extension Networking {
                 storageDelegate != nil else {
                 return .init(
                     "No delegates provided in arguments.",
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 )
             }
 

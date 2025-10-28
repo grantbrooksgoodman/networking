@@ -72,7 +72,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
         if let exception = TranslationValidator.validate(
             inputs: inputs,
             languagePair: languagePair,
-            metadata: [self, #file, #function, #line]
+            metadata: .init(sender: self)
         ) {
             return .failure(exception)
         }
@@ -96,7 +96,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
         }
 
         guard translations.count == inputs.count else {
-            return .failure(.init("Mismatched ratio returned.", metadata: [self, #file, #function, #line]))
+            return .failure(.init("Mismatched ratio returned.", metadata: .init(sender: self)))
         }
 
         return .success(translations)
@@ -111,7 +111,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
         if let exception = TranslationValidator.validate(
             inputs: [input],
             languagePair: languagePair,
-            metadata: [self, #file, #function, #line]
+            metadata: .init(sender: self)
         ) {
             return .failure(exception)
         }
@@ -132,7 +132,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
         ) {
             if TranslationValidator.validate(
                 translation: archivedTranslation,
-                metadata: [self, #file, #function, #line]
+                metadata: .init(sender: self)
             ) != nil || archivedTranslation.input.value == archivedTranslation.output {
                 localTranslationArchiver.removeValue(
                     inputValueEncodedHash: input.value.encodedHash,
@@ -148,7 +148,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
             return .success(archivedTranslation)
         }
 
-        let hasUnicodeLetters = input.value.rangeOfCharacter(from: .letters) != nil
+        let hasUnicodeLetters = input.value.containsLetters
         let sameInputOutputLanguage = await languageRecognitionService.matchConfidence(for: input.value, inLanguage: languagePair.to) > 0.8
 
         if !hasUnicodeLetters || sameInputOutputLanguage {
@@ -178,7 +178,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
         case let .success(translation):
             if TranslationValidator.validate(
                 translation: translation,
-                metadata: [self, #file, #function, #line]
+                metadata: .init(sender: self)
             ) != nil || translation.input.value == translation.output {
                 if let exception = await archiver.removeArchivedTranslation(for: input, languagePair: languagePair) {
                     return .failure(exception)
@@ -211,7 +211,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
                     isReportable: false,
                     userInfo: ["InputValue": input.value,
                                "LanguagePair": languagePair.string],
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 ),
                 domain: .Networking.hostedTranslation
             )
@@ -236,7 +236,7 @@ struct HostedTranslationService: HostedTranslationDelegate {
 
                 if let exception = TranslationValidator.validate(
                     translation: translation,
-                    metadata: [self, #file, #function, #line]
+                    metadata: .init(sender: self)
                 ) {
                     return .failure(exception)
                 }
@@ -323,7 +323,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         var translations = [Translation]()
 
         func handleExceptionAndComplete() {
-            let exception = exceptions.compiledException ?? .init(metadata: [self, #file, #function, #line])
+            let exception = exceptions.compiledException ?? .init(metadata: .init(sender: self))
             guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.unknown(exception.descriptor))) }
 
             Logger.log(exception, domain: .Networking.hostedTranslation)
@@ -344,7 +344,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
             guard translations.count == inputs.count else { return completion(.failure(.unknown("Mismatched ratio returned."))) }
             guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.timedOut)) }
 
-            Logger.log(.timedOut([self, #file, #function, #line]), domain: .Networking.hostedTranslation)
+            Logger.log(.timedOut(metadata: .init(sender: self)), domain: .Networking.hostedTranslation)
             completion(.success(translations))
         }
 

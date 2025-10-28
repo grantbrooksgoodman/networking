@@ -65,7 +65,7 @@ struct Database: DatabaseDelegate {
                 case let .success(values):
                     guard let values else {
                         return continuation.resume(returning: .failure(
-                            .init(metadata: [self, #file, #function, #line])
+                            .init(metadata: .init(sender: self))
                         ))
                     }
 
@@ -99,7 +99,7 @@ struct Database: DatabaseDelegate {
                 case let .success(values):
                     guard let values else {
                         return continuation.resume(returning: .failure(
-                            .init(metadata: [self, #file, #function, #line])
+                            .init(metadata: .init(sender: self))
                         ))
                     }
 

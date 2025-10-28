@@ -17,7 +17,7 @@ public extension Exception {
 
         public static func decodingFailed(
             data: Any,
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Decoding failed.",
@@ -28,7 +28,7 @@ public extension Exception {
 
         public static func invalidType(
             value: Any,
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Serialized type values must conform to NSArray, NSDictionary, NSNull, NSNumber, or NSString.",
@@ -39,7 +39,7 @@ public extension Exception {
 
         public static func notSerialized(
             data: [String: Any],
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             return .init(
                 "Type value must be serialized.",
@@ -50,7 +50,7 @@ public extension Exception {
 
         public static func notUpdatable(
             key: Any,
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "The specified serialization key is not updatable.",
@@ -62,7 +62,7 @@ public extension Exception {
         public static func typecastFailed(
             _ typeName: String? = nil,
             userInfo: [String: Any]? = nil,
-            metadata: [Any]
+            metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Failed to typecast values \(typeName == nil ? "." : "to \(typeName!).")",
@@ -73,7 +73,7 @@ public extension Exception {
 
         public static func typeMismatch(
             key: Any,
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Type mismatch for serialization key.",
@@ -87,7 +87,7 @@ public extension Exception {
         static func hostedItemTypeMismatch(
             at path: String,
             type: HostedItemType?,
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             func exception(_ descriptor: String) -> Exception {
                 .init(
@@ -112,7 +112,7 @@ public extension Exception {
 
         static func inputsFailValidation(
             userInfo: [String: Any],
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Input fails validation.",
@@ -123,7 +123,7 @@ public extension Exception {
 
         static func languagePairFailsValidation(
             userInfo: [String: Any],
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Language pair fails validation.",
@@ -132,17 +132,17 @@ public extension Exception {
             )
         }
 
-        static func readWriteAccessDisabled(_ metadata: [Any]) -> Exception {
+        static func readWriteAccessDisabled(_ metadata: ExceptionMetadata) -> Exception {
             .init(
                 "Read/write access has been disabled.",
                 isReportable: false,
-                metadata: [self, #file, #function, #line]
+                metadata: .init(sender: self)
             )
         }
 
         static func translationFailsValidation(
             userInfo: [String: Any],
-            _ metadata: [Any]
+            _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Translation fails validation.",

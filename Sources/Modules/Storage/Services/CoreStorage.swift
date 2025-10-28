@@ -49,13 +49,13 @@ final class CoreStorage {
     ) {
         guard Networking.isReadWriteEnabled else {
             return completion(.failure(
-                .Networking.readWriteAccessDisabled([self, #file, #function, #line])
+                .Networking.readWriteAccessDisabled(.init(sender: self))
             ))
         }
 
         guard isOnline else {
             return completion(.failure(
-                .internetConnectionOffline([self, #file, #function, #line])
+                .internetConnectionOffline(metadata: .init(sender: self))
             ))
         }
 
@@ -72,7 +72,7 @@ final class CoreStorage {
         let timeout = Timeout(after: duration) {
             guard canComplete else { return }
             completion(.failure(
-                .timedOut([self, #file, #function, #line])
+                .timedOut(metadata: .init(sender: self))
             ))
         }
 
@@ -197,7 +197,7 @@ final class CoreStorage {
         Logger.log(
             "Uploading data to path \"\(metadata.filePath)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         storedDownloadItemResults[metadata.filePath] = nil
@@ -227,7 +227,7 @@ final class CoreStorage {
 
             return nil
         } catch {
-            return .init(error, metadata: [self, #file, #function, #line])
+            return .init(error, metadata: .init(sender: self))
         }
     }
 
@@ -240,7 +240,7 @@ final class CoreStorage {
         Logger.log(
             "Deleting all items at path \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         if let exception = await _deleteAllItems(
@@ -265,7 +265,7 @@ final class CoreStorage {
         Logger.log(
             "Deleting item at path \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         storedDownloadItemResults[path] = nil
@@ -327,7 +327,7 @@ final class CoreStorage {
             try await firebaseStorage.child(path).delete()
             return nil
         } catch {
-            return .init(error, metadata: [self, #file, #function, #line])
+            return .init(error, metadata: .init(sender: self))
         }
     }
 
@@ -342,7 +342,7 @@ final class CoreStorage {
         Logger.log(
             "Downloading all items at path \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         if let exception = await _downloadAllItems(
@@ -373,7 +373,7 @@ final class CoreStorage {
         Logger.log(
             "Downloading item at path \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         let downloadItemStartDate = Date.now
@@ -418,7 +418,7 @@ final class CoreStorage {
                     exceptions.append(.init(
                         "Failed to resolve file name.",
                         userInfo: ["FilePath": filePath],
-                        metadata: [self, #file, #function, #line]
+                        metadata: .init(sender: self)
                     ))
                     continue
                 }
@@ -465,7 +465,7 @@ final class CoreStorage {
             _ = try await firebaseStorage.child(path).writeAsync(toFile: localPath)
             return nil
         } catch {
-            return .init(error, metadata: [self, #file, #function, #line])
+            return .init(error, metadata: .init(sender: self))
         }
     }
 
@@ -475,7 +475,7 @@ final class CoreStorage {
         Logger.log(
             "Enumerating empty directories, starting at \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         let enumerateEmptyDirectoriesResult = await _enumerateEmptyDirectories(startingAt: path)
@@ -502,7 +502,7 @@ final class CoreStorage {
         Logger.log(
             "Checking item exists at path \"\(path)\".",
             domain: .Networking.storage,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         let exception = await _itemExists(
@@ -646,21 +646,21 @@ final class CoreStorage {
             return .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: .file,
-                [self, #file, #function, #line]
+                .init(sender: self)
             )
         } else if existsAsFile,
                   itemType == .directory {
             return .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: .directory,
-                [self, #file, #function, #line]
+                .init(sender: self)
             )
         } else if !existsAsDirectory,
                   !existsAsFile {
             return .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: nil,
-                [self, #file, #function, #line]
+                .init(sender: self)
             )
         }
 
@@ -696,13 +696,13 @@ final class CoreStorage {
                 return .failure(.Networking.hostedItemTypeMismatch(
                     at: path,
                     type: nil,
-                    [self, #file, #function, #line]
+                    .init(sender: self)
                 ))
             }
 
             return .success(directoryListing)
         } catch {
-            return .failure(.init(error, metadata: [self, #file, #function, #line]))
+            return .failure(.init(error, metadata: .init(sender: self)))
         }
     }
 
@@ -711,7 +711,7 @@ final class CoreStorage {
             let getMetadataResult = try await firebaseStorage.child(path).getMetadata()
             return .success(getMetadataResult)
         } catch {
-            return .failure(.init(error, metadata: [self, #file, #function, #line]))
+            return .failure(.init(error, metadata: .init(sender: self)))
         }
     }
 
@@ -732,7 +732,7 @@ final class CoreStorage {
         Logger.log(
             "Returning stored download item result for network path \"\(networkPath)\".",
             domain: .caches,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         return true
@@ -754,7 +754,7 @@ final class CoreStorage {
         Logger.log(
             "Returning stored item exists result for network path \"\(path)\".",
             domain: .caches,
-            metadata: [self, #file, #function, #line]
+            sender: self
         )
 
         return true

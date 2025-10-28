@@ -37,7 +37,7 @@ extension Translation: Serializable {
         case let .archived(hash, value: value):
             if let value {
                 guard let components = value.decodedTranslationComponents else {
-                    return .failure(.Networking.decodingFailed(data: data, [self, #file, #function, #line]))
+                    return .failure(.Networking.decodingFailed(data: data, .init(sender: self)))
                 }
 
                 let decoded: Translation = .init(

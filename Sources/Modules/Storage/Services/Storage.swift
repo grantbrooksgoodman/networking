@@ -167,7 +167,7 @@ struct Storage: StorageDelegate {
                 case let .success(emptyDirectories):
                     guard let emptyDirectories = emptyDirectories as? Set<String> else {
                         return continuation.resume(returning: .failure(
-                            .init(metadata: [self, #file, #function, #line])
+                            .init(metadata: .init(sender: self))
                         ))
                     }
 
@@ -201,7 +201,7 @@ struct Storage: StorageDelegate {
                 case let .success(itemExists):
                     guard let itemExists = itemExists as? Bool else {
                         return continuation.resume(returning: .failure(
-                            .init(metadata: [self, #file, #function, #line])
+                            .init(metadata: .init(sender: self))
                         ))
                     }
 

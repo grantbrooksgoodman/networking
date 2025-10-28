@@ -17,7 +17,7 @@ public enum TranslationValidator {
         inputs: [TranslationInput]? = nil,
         languagePair: LanguagePair? = nil,
         translation: Translation? = nil,
-        metadata: [Any]
+        metadata: ExceptionMetadata
     ) -> Exception? {
         assert(
             inputs != nil ||
