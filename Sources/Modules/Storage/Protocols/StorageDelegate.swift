@@ -52,6 +52,13 @@ public protocol StorageDelegate {
         timeout duration: Duration
     ) async -> Callback<Set<String>, Exception>
 
+    func getDirectoryListing(
+        at path: String,
+        firstResultOnly: Bool,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<DirectoryListing, Exception>
+
     func itemExists(
         as itemType: HostedItemType,
         at path: String,
@@ -139,6 +146,20 @@ public extension StorageDelegate {
     ) async -> Callback<Set<String>, Exception> {
         await enumerateEmptyDirectories(
             startingAt: path,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
+    func getDirectoryListing(
+        at path: String,
+        firstResultOnly: Bool = false,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10)
+    ) async -> Callback<DirectoryListing, Exception> {
+        await getDirectoryListing(
+            at: path,
+            firstResultOnly: firstResultOnly,
             prependingEnvironment: prependingEnvironment,
             timeout: duration
         )

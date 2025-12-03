@@ -104,13 +104,13 @@ final class HostedTranslationArchiver {
         languagePair: LanguagePair
     ) async -> Callback<Translation, Exception> {
         let path = "\(NetworkPath.translations.rawValue)/\(languagePair.string)/\(inputValueEncodedHash)"
-        let commonParams = ["Path": path]
+        let userInfo = ["Path": path]
 
         if let exception = TranslationValidator.validate(
             languagePair: languagePair,
             metadata: .init(sender: self)
         ) {
-            return .failure(exception.appending(userInfo: commonParams))
+            return .failure(exception.appending(userInfo: userInfo))
         }
 
         let getValuesResult = await database.getValues(at: path)
@@ -123,7 +123,7 @@ final class HostedTranslationArchiver {
                     userInfo: ["Value": values],
                     metadata: .init(sender: self)
                 )
-                return .failure(exception.appending(userInfo: commonParams))
+                return .failure(exception.appending(userInfo: userInfo))
             }
 
             guard let components = string.decodedTranslationComponents else {
@@ -131,7 +131,7 @@ final class HostedTranslationArchiver {
                     .Networking.decodingFailed(
                         data: string,
                         .init(sender: self)
-                    ).appending(userInfo: commonParams)
+                    ).appending(userInfo: userInfo)
                 )
             }
 
@@ -144,7 +144,7 @@ final class HostedTranslationArchiver {
             )
 
         case let .failure(exception):
-            return .failure(exception.appending(userInfo: commonParams))
+            return .failure(exception.appending(userInfo: userInfo))
         }
     }
 

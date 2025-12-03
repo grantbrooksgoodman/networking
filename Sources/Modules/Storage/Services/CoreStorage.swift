@@ -25,10 +25,7 @@ final class CoreStorage {
 
     // MARK: - Properties
 
-    // CacheStrategy
     private var globalCacheStrategy: CacheStrategy?
-
-    // Dictionary
     @LockIsolated private var storedDownloadItemResults = [String: DataSample]()
     @LockIsolated private var storedItemExistsResults = [String: DataSample]()
 
@@ -150,6 +147,24 @@ final class CoreStorage {
                 timeout.cancel()
                 guard canComplete else { return }
                 completion(enumerateEmptyDirectoriesResult)
+            }
+
+        case let .getDirectoryListing(
+            atPath: path,
+            firstResultOnly: firstResultOnly
+        ):
+            Task {
+                let getDirectoryListingResult = await getDirectoryListing(
+                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                    firstResultOnly: firstResultOnly
+                )
+
+                timeout.cancel()
+                guard canComplete else { return }
+                switch getDirectoryListingResult {
+                case let .success(directoryListing): completion(.success(directoryListing))
+                case let .failure(exception): completion(.failure(exception))
+                }
             }
 
         case let .itemExists(
@@ -486,6 +501,36 @@ final class CoreStorage {
         }
     }
 
+    private func getDirectoryListing(
+        at path: String,
+        firstResultOnly: Bool = false,
+    ) async -> Callback<DirectoryListing, Exception> {
+        do {
+            var listResult: StorageListResult!
+
+            if firstResultOnly {
+                listResult = try await firebaseStorage.child(path).list(maxResults: 1)
+            } else {
+                listResult = try await firebaseStorage.child(path).listAll()
+            }
+
+            let directoryListing = DirectoryListing(listResult)
+
+            if directoryListing.filePaths.isEmpty,
+               directoryListing.subdirectories.isEmpty {
+                return .failure(.Networking.hostedItemTypeMismatch(
+                    at: path,
+                    type: nil,
+                    .init(sender: self)
+                ))
+            }
+
+            return .success(directoryListing)
+        } catch {
+            return .failure(.init(error, metadata: .init(sender: self)))
+        }
+    }
+
     private func itemExists(
         as itemType: HostedItemType,
         at path: String,
@@ -675,36 +720,6 @@ final class CoreStorage {
     }
 
     // MARK: - Auxiliary
-
-    private func getDirectoryListing(
-        at path: String,
-        firstResultOnly: Bool = false,
-    ) async -> Callback<DirectoryListing, Exception> {
-        do {
-            var listResult: StorageListResult!
-
-            if firstResultOnly {
-                listResult = try await firebaseStorage.child(path).list(maxResults: 1)
-            } else {
-                listResult = try await firebaseStorage.child(path).listAll()
-            }
-
-            let directoryListing = DirectoryListing(listResult)
-
-            if directoryListing.filePaths.isEmpty,
-               directoryListing.subdirectories.isEmpty {
-                return .failure(.Networking.hostedItemTypeMismatch(
-                    at: path,
-                    type: nil,
-                    .init(sender: self)
-                ))
-            }
-
-            return .success(directoryListing)
-        } catch {
-            return .failure(.init(error, metadata: .init(sender: self)))
-        }
-    }
 
     private func getFileMetadata(at path: String) async -> Callback<StorageMetadata, Exception> {
         do {

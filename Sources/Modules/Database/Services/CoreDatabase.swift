@@ -365,7 +365,7 @@ final class CoreDatabase {
 
         do {
             let getDataResult = try await query.getData()
-            guard isEmpty(getDataResult.value),
+            guard !isEmpty(getDataResult.value),
                   let value = getDataResult.value else {
                 return .failure(.init(
                     "No value exists at the specified key path.",

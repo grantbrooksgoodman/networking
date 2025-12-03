@@ -180,6 +180,38 @@ struct Storage: StorageDelegate {
         }
     }
 
+    func getDirectoryListing(
+        at path: String,
+        firstResultOnly: Bool,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<DirectoryListing, Exception> {
+        await withCheckedContinuation { continuation in
+            coreStorage.performOperation(
+                .getDirectoryListing(
+                    atPath: path,
+                    firstResultOnly: firstResultOnly
+                ),
+                prependingEnvironment: prependingEnvironment,
+                timeout: duration
+            ) { callback in
+                switch callback {
+                case let .success(directoryListing):
+                    guard let directoryListing = directoryListing as? DirectoryListing else {
+                        return continuation.resume(returning: .failure(
+                            .init(metadata: .init(sender: self))
+                        ))
+                    }
+
+                    continuation.resume(returning: .success(directoryListing))
+
+                case let .failure(exception):
+                    continuation.resume(returning: .failure(exception))
+                }
+            }
+        }
+    }
+
     func itemExists(
         as itemType: HostedItemType,
         at path: String,
