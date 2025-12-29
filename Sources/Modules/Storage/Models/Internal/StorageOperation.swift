@@ -46,6 +46,10 @@ enum StorageOperation {
         cacheStrategy: CacheStrategy
     )
 
+    case sizeInKilobytes(
+        ofItemAtPath: String
+    )
+
     case upload(
         _ data: Data,
         metadata: HostedItemMetadata

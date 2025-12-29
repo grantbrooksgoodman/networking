@@ -70,6 +70,12 @@ public protocol StorageDelegate {
     /// Overrides the `CacheStrategy` for all `Storage` methods. Pass `nil` to revert the override.
     func setGlobalCacheStrategy(_ globalCacheStrategy: CacheStrategy?)
 
+    func sizeInKilobytes(
+        ofItemAt path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Int, Exception>
+
     func upload(
         _ data: Data,
         metadata: HostedItemMetadata,
@@ -177,6 +183,18 @@ public extension StorageDelegate {
             at: path,
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+    }
+
+    func sizeInKilobytes(
+        ofItemAt path: String,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10)
+    ) async -> Callback<Int, Exception> {
+        await sizeInKilobytes(
+            ofItemAt: path,
+            prependingEnvironment: prependingEnvironment,
             timeout: duration
         )
     }

@@ -184,6 +184,19 @@ final class CoreStorage {
                 completion(itemExistsResult)
             }
 
+        case let .sizeInKilobytes(
+            ofItemAtPath: path
+        ):
+            Task {
+                let sizeInKilobytesResult = await sizeInKilobytes(
+                    ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                )
+
+                timeout.cancel()
+                guard canComplete else { return }
+                completion(sizeInKilobytesResult)
+            }
+
         case let .upload(
             data,
             metadata: metadata
@@ -564,6 +577,20 @@ final class CoreStorage {
         }
 
         return .success(exception == nil)
+    }
+
+    private func sizeInKilobytes(
+        ofItemAt path: String
+    ) async -> Callback<Any?, Exception> {
+        let getFileMetadataResult = await getFileMetadata(at: path)
+
+        switch getFileMetadataResult {
+        case let .success(metadata):
+            return .success(Int(metadata.size / 1024))
+
+        case let .failure(exception):
+            return .failure(exception)
+        }
     }
 
     private func _enumerateEmptyDirectories(

@@ -246,6 +246,34 @@ struct Storage: StorageDelegate {
         }
     }
 
+    func sizeInKilobytes(
+        ofItemAt path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Int, Exception> {
+        await withCheckedContinuation { continuation in
+            coreStorage.performOperation(
+                .sizeInKilobytes(ofItemAtPath: path),
+                prependingEnvironment: prependingEnvironment,
+                timeout: duration
+            ) { callback in
+                switch callback {
+                case let .success(sizeInKilobytes):
+                    guard let sizeInKilobytes = sizeInKilobytes as? Int else {
+                        return continuation.resume(returning: .failure(
+                            .init(metadata: .init(sender: self))
+                        ))
+                    }
+
+                    continuation.resume(returning: .success(sizeInKilobytes))
+
+                case let .failure(exception):
+                    continuation.resume(returning: .failure(exception))
+                }
+            }
+        }
+    }
+
     // MARK: - Clear Store
 
     func clearStore() {
