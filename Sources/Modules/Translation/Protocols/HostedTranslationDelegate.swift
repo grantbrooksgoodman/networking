@@ -28,10 +28,12 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate {
 
     func resolve(_ strings: TranslatedLabelStrings.Type) async -> Callback<[TranslationOutputMap], Exception>
 
+    // TODO: Enable enhancement for getTranslations method.
     func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
+        enhance enhancementConfig: EnhancementConfiguration?
     ) async -> Callback<Translation, Exception>
 }
 
@@ -51,12 +53,14 @@ public extension HostedTranslationDelegate {
     func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil,
+        enhance enhancementConfig: EnhancementConfiguration? = nil
     ) async -> Callback<Translation, Exception> {
         await translate(
             input,
             with: languagePair,
-            hud: hudConfig
+            hud: hudConfig,
+            enhance: enhancementConfig
         )
     }
 }

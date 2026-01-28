@@ -49,6 +49,7 @@ public extension Networking {
         package var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         package var authDelegate: AuthDelegate = Auth()
         package var databaseDelegate: DatabaseDelegate = Database()
+        package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate?
         package var hostedTranslationDelegate: HostedTranslationDelegate = HostedTranslationService()
         package var storageDelegate: StorageDelegate = Storage()
 
@@ -67,7 +68,9 @@ public extension Networking {
         /* MARK: Init */
 
         private init() {
-            guard Networking.didInitialize else { fatalError("Networking.initialize() must be called at app launch") }
+            guard Networking.didInitialize else {
+                fatalError("Networking.initialize() must be called at app launch")
+            }
         }
 
         /* MARK: Set Environment */
@@ -84,12 +87,14 @@ public extension Networking {
             activityIndicatorDelegate: NetworkActivityIndicatorDelegate? = nil,
             authDelegate: AuthDelegate? = nil,
             databaseDelegate: DatabaseDelegate? = nil,
+            geminiAPIKeyDelegate: GeminiAPIKeyDelegate? = nil,
             hostedTranslationDelegate: HostedTranslationDelegate? = nil,
             storageDelegate: StorageDelegate? = nil
         ) -> Exception? {
             guard activityIndicatorDelegate != nil ||
                 authDelegate != nil ||
                 databaseDelegate != nil ||
+                geminiAPIKeyDelegate != nil ||
                 hostedTranslationDelegate != nil ||
                 storageDelegate != nil else {
                 return .init(
@@ -101,6 +106,7 @@ public extension Networking {
             if let activityIndicatorDelegate { self.activityIndicatorDelegate = activityIndicatorDelegate }
             if let authDelegate { self.authDelegate = authDelegate }
             if let databaseDelegate { self.databaseDelegate = databaseDelegate }
+            if let geminiAPIKeyDelegate { self.geminiAPIKeyDelegate = geminiAPIKeyDelegate }
             if let hostedTranslationDelegate { self.hostedTranslationDelegate = hostedTranslationDelegate }
             if let storageDelegate { self.storageDelegate = storageDelegate }
 
@@ -121,6 +127,10 @@ public extension Networking {
 
         public func registerDatabaseDelegate(_ databaseDelegate: DatabaseDelegate) {
             register(databaseDelegate: databaseDelegate)
+        }
+
+        public func registerGeminiAPIKeyDelegate(_ geminiAPIKeyDelegate: GeminiAPIKeyDelegate) {
+            register(geminiAPIKeyDelegate: geminiAPIKeyDelegate)
         }
 
         public func registerStorageDelegate(_ storageDelegate: StorageDelegate) {

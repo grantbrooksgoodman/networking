@@ -103,10 +103,11 @@ struct HostedTranslationService: HostedTranslationDelegate {
     }
 
     // swiftlint:disable:next function_body_length
-    func translate(
+    func translate( // TODO: Tidy this method up; split it into parts.
         _ input: TranslationInput,
         with languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
+        enhance enhancementConfig: EnhancementConfiguration?
     ) async -> Callback<Translation, Exception> {
         if let exception = TranslationValidator.validate(
             inputs: [input],
@@ -228,11 +229,23 @@ struct HostedTranslationService: HostedTranslationDelegate {
 
             switch translateResult {
             case let .success(translation):
-                let translation: Translation = .init(
+                var translation: Translation = .init(
                     input: input,
                     output: translation.output,
                     languagePair: translation.languagePair
                 )
+
+                if let enhancementConfig {
+                    let enhanceResult = await GeminiService.shared.enhance(
+                        translation,
+                        using: enhancementConfig
+                    )
+
+                    switch enhanceResult {
+                    case let .success(enhancedTranslation): translation = enhancedTranslation
+                    case let .failure(exception): return .failure(exception)
+                    }
+                }
 
                 if let exception = TranslationValidator.validate(
                     translation: translation,
