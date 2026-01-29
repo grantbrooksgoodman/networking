@@ -13,7 +13,7 @@ import Translator
 
 public extension Translation {
     var isAIEnhanced: Bool {
-        // TODO: Strengthen this (i.e., length).
-        output.hasPrefix(GeminiConstants.enhancementToken)
+        output != GeminiConstants.enhancementToken &&
+            output.hasPrefix(GeminiConstants.enhancementToken)
     }
 }

@@ -31,8 +31,8 @@ final class GeminiService {
 
     func enhance(
         _ translation: Translation,
-        using configuration: EnhancementConfiguration,
-    ) async -> Callback<Translation, Exception> {
+        using configuration: EnhancementConfiguration
+    ) async -> Callback<Translation, Exception>? {
         guard let geminiAPIKey = Networking.config.geminiAPIKeyDelegate?.apiKey else {
             return .failure(.init(
                 "Gemini API key delegate has not been registered.",
@@ -69,13 +69,28 @@ final class GeminiService {
             case let .failure(exception): return .failure(exception)
             }
 
-            // TODO: Remove.
-            if geminiResponse.candidates?.count ?? 0 > 1 {
-                print("WE HAVE MULTIPLE CANDIDATES!!!!!!!!!!!!!")
+            guard let candidates = geminiResponse.candidates else {
+                return .failure(.init(
+                    "No candidates returned in response.",
+                    metadata: .init(sender: self)
+                ))
             }
 
-            guard let enhancedOutput = geminiResponse
-                .candidates?
+            if candidates.count > 1 {
+                let concatenatedCandidates = candidates
+                    .compactMap(\.content?.concatenatedText)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .joined(separator: "\n\n")
+
+                Logger.log(.init(
+                    "Gemini response had multiple candidates.",
+                    isReportable: false,
+                    userInfo: ["ConcatenatedCandidates": concatenatedCandidates],
+                    metadata: .init(sender: self)
+                ), domain: .Networking.hostedTranslation)
+            }
+
+            guard let enhancedOutput = candidates
                 .compactMap(\.content)
                 .first?
                 .concatenatedText?
@@ -87,18 +102,65 @@ final class GeminiService {
                 ))
             }
 
+            // TODO: Clean this up.
+
+            let outputComponents = enhancedOutput.components(separatedBy: " ")
+            let firstHalfOfOutput = outputComponents[0 ... outputComponents.count / 2]
+                .joined(separator: " ")
+
+            if enhancedOutput
+                .lowercasedTrimmingWhitespaceAndNewlines == translation
+                .output
+                .lowercasedTrimmingWhitespaceAndNewlines ||
+                (translation.output.count != enhancedOutput.count &&
+                    translation.output.hasPrefix(firstHalfOfOutput)) ||
+                translation.output.count > enhancedOutput.count {
+                return nil
+            }
+
+            let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last ?? ""
+            let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last ?? ""
+
+            guard await LanguageRecognitionService.shared.matchConfidence(
+                for: lastEnhancedOutputWord,
+                inLanguage: translation.languagePair.to
+            ) >= LanguageRecognitionService.shared.matchConfidence(
+                for: lastOriginalOutputWord,
+                inLanguage: translation.languagePair.to
+            ) else {
+                return nil
+            }
+
+            guard await LanguageRecognitionService.shared.matchConfidence(
+                for: enhancedOutput,
+                inLanguage: translation.languagePair.to
+            ) >= LanguageRecognitionService.shared.matchConfidence(
+                for: translation.output,
+                inLanguage: translation.languagePair.to
+            ) else {
+                return nil
+            }
+
             guard await LanguageRecognitionService.shared.matchConfidence(
                 for: enhancedOutput,
                 inLanguage: translation.languagePair.to
             ) > 0.8 else {
                 return .failure(.init(
                     "Enhanced translation is not in target language.",
-                    userInfo: [
-                        "EnhancedTranslationOutput": enhancedOutput,
-                    ],
+                    userInfo: ["EnhancedTranslationOutput": enhancedOutput],
                     metadata: .init(sender: self)
                 ))
             }
+
+            Logger.log(.init(
+                "Successfully AI-enhanced translation.",
+                isReportable: false,
+                userInfo: [
+                    "OriginalOutput": translation.output,
+                    "EnhancedOutput": enhancedOutput,
+                ],
+                metadata: .init(sender: self)
+            ), domain: .Networking.hostedTranslation)
 
             return .success(.init(
                 input: translation.input,
@@ -143,7 +205,7 @@ final class GeminiService {
 
         if let additionalContext = configuration.additionalContext,
            !additionalContext.isEmpty {
-            userPrompt += "\nConversational context: \(additionalContext)"
+            userPrompt += "\nAdditional context: \(additionalContext)"
         }
 
         userPrompt += """

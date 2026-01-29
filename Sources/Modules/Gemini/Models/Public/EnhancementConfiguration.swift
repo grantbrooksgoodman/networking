@@ -22,7 +22,7 @@ public struct EnhancementConfiguration {
         model: GeminiModel = .flash25,
         maximumOutputTokens: Int = 256,
         temperature: Double = 0.0,
-        additionalContext: String? = nil
+        additionalContext: String?
     ) {
         self.model = model
         self.maximumOutputTokens = maximumOutputTokens

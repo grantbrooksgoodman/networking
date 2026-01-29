@@ -83,7 +83,7 @@ struct Storage: StorageDelegate {
                     atPath: path
                 ),
                 prependingEnvironment: prependingEnvironment,
-                timeout: duration,
+                timeout: duration
             ) { callback in
                 switch callback {
                 case .success: continuation.resume(returning: nil)

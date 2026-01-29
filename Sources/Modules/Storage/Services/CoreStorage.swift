@@ -487,7 +487,7 @@ final class CoreStorage {
 
     private func _downloadItem(
         at path: String,
-        to localPath: URL,
+        to localPath: URL
     ) async -> Exception? {
         do {
             _ = try await firebaseStorage.child(path).writeAsync(toFile: localPath)
@@ -516,7 +516,7 @@ final class CoreStorage {
 
     private func getDirectoryListing(
         at path: String,
-        firstResultOnly: Bool = false,
+        firstResultOnly: Bool = false
     ) async -> Callback<DirectoryListing, Exception> {
         do {
             var listResult: StorageListResult!

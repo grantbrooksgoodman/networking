@@ -8,9 +8,7 @@
 /* Native */
 import Foundation
 
-/* Proprietary */
-import AppSubsystem
-
+// swiftlint:disable:next class_delegate_protocol
 public protocol GeminiAPIKeyDelegate {
     var apiKey: String { get }
 }

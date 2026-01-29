@@ -5,6 +5,8 @@
 //  Copyright © NEOTechnica Corporation. All rights reserved.
 //
 
+// swiftlint:disable file_length type_body_length
+
 /* Native */
 import Foundation
 
@@ -14,6 +16,14 @@ import AppSubsystem
 import Translator
 
 struct HostedTranslationService: HostedTranslationDelegate {
+    // MARK: - Types
+
+    private enum ArchiveTreatment {
+        case addToHostedArchive
+        case addToLocalArchive
+        case addToBothArchives
+    }
+
     // MARK: - Dependencies
 
     @Dependency(\.languageRecognitionService) private var languageRecognitionService: LanguageRecognitionService
@@ -44,17 +54,26 @@ struct HostedTranslationService: HostedTranslationDelegate {
             return .success(strings.defaultOutputMap)
         }
 
-        let getTranslationsResult = await getTranslations(for: strings.keyPairs.map(\.input), languagePair: .system)
+        let getTranslationsResult = await getTranslations(
+            for: strings.keyPairs.map(\.input),
+            languagePair: .system
+        )
 
         switch getTranslationsResult {
         case let .success(translations):
             let outputs = strings.keyPairs.reduce(into: [TranslationOutputMap]()) { partialResult, keyPair in
-                if let translation = translations.first(where: { $0.input.value == keyPair.input.value }) {
-                    partialResult.append(.init(key: keyPair.key, value: translation.output))
+                if let translation = translations.first(where: {
+                    $0.input.value == keyPair.input.value
+                }) {
+                    partialResult.append(.init(
+                        key: keyPair.key,
+                        value: translation.output
+                    ))
                 } else {
                     partialResult.append(keyPair.defaultOutputMap)
                 }
             }
+
             return .success(outputs)
 
         case let .failure(error):
@@ -67,48 +86,219 @@ struct HostedTranslationService: HostedTranslationDelegate {
     func getTranslations(
         for inputs: [TranslationInput],
         languagePair: LanguagePair,
-        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?
+        hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
+        enhance enhancementConfig: EnhancementConfiguration?
     ) async -> Callback<[Translation], Exception> {
-        if let exception = TranslationValidator.validate(
-            inputs: inputs,
-            languagePair: languagePair,
-            metadata: .init(sender: self)
-        ) {
-            return .failure(exception)
-        }
-
         var translations = [Translation]()
 
         for input in inputs {
             let translateResult = await translate(
                 input,
                 with: languagePair,
-                hud: hudConfig
+                hud: hudConfig,
+                enhance: enhancementConfig
             )
 
             switch translateResult {
-            case let .success(translation):
-                translations.append(translation)
-
-            case let .failure(exception):
-                return .failure(exception)
+            case let .success(translation): translations.append(translation)
+            case let .failure(exception): return .failure(exception)
             }
         }
 
         guard translations.count == inputs.count else {
-            return .failure(.init("Mismatched ratio returned.", metadata: .init(sender: self)))
+            return .failure(.init(
+                "Mismatched ratio returned.",
+                metadata: .init(sender: self)
+            ))
         }
 
         return .success(translations)
     }
 
-    // swiftlint:disable:next function_body_length
-    func translate( // TODO: Tidy this method up; split it into parts.
+    func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
         enhance enhancementConfig: EnhancementConfiguration?
     ) async -> Callback<Translation, Exception> {
+        let prevalidateInputResult = await prevalidateInput(
+            input,
+            languagePair: languagePair,
+            enhancementConfig: enhancementConfig
+        )
+
+        if let prevalidateInputResult {
+            return prevalidateInputResult
+        }
+
+        Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
+
+        let checkHostedArchiveResult = await checkHostedArchive(
+            for: input,
+            languagePair: languagePair,
+            enhancementConfig: enhancementConfig
+        )
+
+        if let checkHostedArchiveResult {
+            return checkHostedArchiveResult
+        }
+
+        let sourceLanguageName = languagePair.from.englishLanguageName ?? languagePair.from.uppercased()
+        let targetLanguageName = languagePair.to.englishLanguageName ?? languagePair.to.uppercased()
+
+        Logger.log(
+            .init(
+                "Translating text from \(sourceLanguageName) to \(targetLanguageName).",
+                isReportable: false,
+                userInfo: [
+                    "InputValue": input.value,
+                    "LanguagePair": languagePair.string,
+                ],
+                metadata: .init(sender: self)
+            ),
+            domain: .Networking.hostedTranslation
+        )
+
+        let translateResult = await translator.translate(
+            .init(
+                input.value.trimmingTrailingWhitespace,
+                alternate: input.alternate?.trimmingTrailingWhitespace
+            ),
+            languagePair: languagePair,
+            hud: hudConfig,
+            timeout: (.seconds(10), false)
+        )
+
+        switch translateResult {
+        case let .success(translation):
+            return await postProcess(
+                translation,
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: .addToBothArchives
+            )
+
+        case let .failure(exception):
+            guard exception.isEqual(toAny: [
+                .Networking.Translation.exhaustedAvailablePlatforms,
+                .Networking.Translation.sameTranslationInputOutput,
+            ]) else {
+                return .failure(exception)
+            }
+
+            return await postProcess(
+                .init(
+                    input: input,
+                    output: input.value.sanitized,
+                    languagePair: languagePair
+                ),
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: .addToBothArchives
+            )
+        }
+    }
+
+    // MARK: - Auxiliary
+
+    private func checkHostedArchive(
+        for input: TranslationInput,
+        languagePair: LanguagePair,
+        enhancementConfig: EnhancementConfiguration?
+    ) async -> Callback<Translation, Exception>? {
+        let findArchivedTranslationResult = await archiver.findArchivedTranslation(
+            input: input,
+            languagePair: languagePair
+        )
+
+        switch findArchivedTranslationResult {
+        case let .success(translation):
+            if TranslationValidator.validate(
+                translation: translation,
+                metadata: .init(sender: self)
+            ) != nil || translation.input.value == translation.output {
+                if let exception = await archiver.removeArchivedTranslation(
+                    for: input,
+                    languagePair: languagePair
+                ) {
+                    return .failure(exception)
+                }
+
+                return nil
+            }
+
+            return await postProcess(
+                translation,
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: .addToLocalArchive
+            )
+
+        case let .failure(exception):
+            guard exception.isEqual(toAny: [
+                .Networking.Database.noValueExists,
+                .Networking.Translation.translationDerivationFailed,
+            ]) else {
+                return .failure(exception)
+            }
+
+            return nil
+        }
+    }
+
+    private func postProcess(
+        _ translation: Translation,
+        enhancementConfig: EnhancementConfiguration?,
+        archiveTreatment: ArchiveTreatment?
+    ) async -> Callback<Translation, Exception> {
+        var translation = translation
+
+        if let enhancementConfig,
+           translation.input.value != translation.output,
+           !translation.languagePair.isIdempotent,
+           translation.output.count <= 200 {
+            let enhanceResult = await GeminiService.shared.enhance(
+                translation,
+                using: enhancementConfig
+            )
+
+            if let enhanceResult {
+                switch enhanceResult {
+                case let .success(enhancedTranslation): translation = enhancedTranslation
+                case let .failure(exception):
+                    Logger.log(
+                        exception,
+                        domain: .Networking.hostedTranslation,
+                        with: .toastInPrerelease
+                    )
+                }
+            }
+        }
+
+        if let exception = TranslationValidator.validate(
+            translation: translation,
+            metadata: .init(sender: self)
+        ) {
+            return .failure(exception)
+        }
+
+        if archiveTreatment == .addToBothArchives ||
+            archiveTreatment == .addToHostedArchive,
+            let exception = await archiver.addToHostedArchive(translation) {
+            return .failure(exception)
+        }
+
+        guard translation.input.value != translation.output,
+              archiveTreatment == .addToBothArchives ||
+              archiveTreatment == .addToLocalArchive else { return .success(translation) }
+
+        localTranslationArchiver.addValue(translation)
+        return .success(translation)
+    }
+
+    private func prevalidateInput(
+        _ input: TranslationInput,
+        languagePair: LanguagePair,
+        enhancementConfig: EnhancementConfiguration?
+    ) async -> Callback<Translation, Exception>? {
         if let exception = TranslationValidator.validate(
             inputs: [input],
             languagePair: languagePair,
@@ -117,6 +307,8 @@ struct HostedTranslationService: HostedTranslationDelegate {
             return .failure(exception)
         }
 
+        // If language pair is idempotent, return original input.
+
         if languagePair.isIdempotent {
             let translation: Translation = .init(
                 input: input,
@@ -124,8 +316,14 @@ struct HostedTranslationService: HostedTranslationDelegate {
                 languagePair: languagePair
             )
 
-            return .success(translation)
+            return await postProcess(
+                translation,
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: nil
+            )
         }
+
+        // Attempt to find a suitable locally archived translation.
 
         if let archivedTranslation = localTranslationArchiver.getValue(
             inputValueEncodedHash: input.value.encodedHash,
@@ -139,157 +337,42 @@ struct HostedTranslationService: HostedTranslationDelegate {
                     inputValueEncodedHash: input.value.encodedHash,
                     languagePair: languagePair
                 )
-                return await translate(
-                    input,
-                    with: languagePair,
-                    hud: hudConfig
-                )
+                return nil
             }
 
-            return .success(archivedTranslation)
+            return await postProcess(
+                archivedTranslation,
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: nil
+            )
         }
+
+        // If no letters or input is already in target language, return original input.
 
         let hasUnicodeLetters = input.value.containsLetters
-        let sameInputOutputLanguage = await languageRecognitionService.matchConfidence(for: input.value, inLanguage: languagePair.to) > 0.8
+        let sameInputOutputLanguage = await languageRecognitionService.matchConfidence(
+            for: input.value,
+            inLanguage: languagePair.to
+        ) > 0.8
 
         if !hasUnicodeLetters || sameInputOutputLanguage {
-            let translation: Translation = .init(
-                input: input,
-                output: input.value.sanitized,
-                languagePair: languagePair
-            )
-
-            if let exception = await archiver.addToHostedArchive(translation) {
-                return .failure(exception)
-            }
-
-            localTranslationArchiver.addValue(translation)
-            return .success(translation)
-        }
-
-        Networking.config.activityIndicatorDelegate.show()
-        defer { Networking.config.activityIndicatorDelegate.hide() }
-
-        let findArchivedTranslationResult = await archiver.findArchivedTranslation(
-            input: input,
-            languagePair: languagePair
-        )
-
-        switch findArchivedTranslationResult {
-        case let .success(translation):
-            if TranslationValidator.validate(
-                translation: translation,
-                metadata: .init(sender: self)
-            ) != nil || translation.input.value == translation.output {
-                if let exception = await archiver.removeArchivedTranslation(for: input, languagePair: languagePair) {
-                    return .failure(exception)
-                }
-
-                return await translate(
-                    input,
-                    with: languagePair,
-                    hud: hudConfig
-                )
-            }
-
-            guard translation.input.value != translation.output else { return .success(translation) }
-            localTranslationArchiver.addValue(translation)
-            return .success(translation)
-
-        case let .failure(exception):
-            guard exception.isEqual(toAny: [
-                .Networking.Database.noValueExists,
-                .Networking.Translation.translationDerivationFailed,
-            ]) else {
-                return .failure(exception)
-            }
-
-            let sourceLanguageName = languagePair.from.englishLanguageName ?? languagePair.from.uppercased()
-            let targetLanguageName = languagePair.to.englishLanguageName ?? languagePair.to.uppercased()
-            Logger.log(
-                .init(
-                    "Translating text from \(sourceLanguageName) to \(targetLanguageName).",
-                    isReportable: false,
-                    userInfo: ["InputValue": input.value,
-                               "LanguagePair": languagePair.string],
-                    metadata: .init(sender: self)
-                ),
-                domain: .Networking.hostedTranslation
-            )
-
-            let translateResult = await translator.translate(
-                .init(
-                    input.value.trimmingTrailingWhitespace,
-                    alternate: input.alternate?.trimmingTrailingWhitespace
-                ),
-                languagePair: languagePair,
-                hud: hudConfig,
-                timeout: (.seconds(10), false)
-            )
-
-            switch translateResult {
-            case let .success(translation):
-                var translation: Translation = .init(
-                    input: input,
-                    output: translation.output,
-                    languagePair: translation.languagePair
-                )
-
-                if let enhancementConfig {
-                    let enhanceResult = await GeminiService.shared.enhance(
-                        translation,
-                        using: enhancementConfig
-                    )
-
-                    switch enhanceResult {
-                    case let .success(enhancedTranslation): translation = enhancedTranslation
-                    case let .failure(exception): return .failure(exception)
-                    }
-                }
-
-                if let exception = TranslationValidator.validate(
-                    translation: translation,
-                    metadata: .init(sender: self)
-                ) {
-                    return .failure(exception)
-                }
-
-                if let exception = await archiver.addToHostedArchive(translation) {
-                    return .failure(exception)
-                }
-
-                guard translation.input.value != translation.output else { return .success(translation) }
-                localTranslationArchiver.addValue(translation)
-                return .success(translation)
-
-            case let .failure(exception):
-                guard exception.isEqual(toAny: [
-                    .Networking.Translation.exhaustedAvailablePlatforms,
-                    .Networking.Translation.sameTranslationInputOutput,
-                ]) else {
-                    return .failure(exception)
-                }
-
-                let translation: Translation = .init(
+            return await postProcess(
+                Translation(
                     input: input,
                     output: input.value.sanitized,
                     languagePair: languagePair
-                )
-
-                if let exception = await archiver.addToHostedArchive(translation) {
-                    return .failure(exception)
-                }
-
-                guard translation.input.value != translation.output else { return .success(translation) }
-                localTranslationArchiver.addValue(translation)
-                return .success(translation)
-            }
+                ),
+                enhancementConfig: enhancementConfig,
+                archiveTreatment: .addToBothArchives
+            )
         }
+
+        return nil
     }
 }
 
 extension HostedTranslationService: AlertKit.TranslationDelegate {
-    public func getTranslations(
+    func getTranslations(
         _ inputs: [TranslationInput],
         languagePair: LanguagePair,
         hud hudConfig: AlertKit.HUDConfig?,
@@ -337,27 +420,49 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
 
         func handleExceptionAndComplete() {
             let exception = exceptions.compiledException ?? .init(metadata: .init(sender: self))
-            guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.unknown(exception.descriptor))) }
+            guard timeoutConfig.returnsInputsOnFailure else {
+                return completion(.failure(
+                    .unknown(exception.descriptor)
+                ))
+            }
 
-            Logger.log(exception, domain: .Networking.hostedTranslation)
+            Logger.log(
+                exception,
+                domain: .Networking.hostedTranslation
+            )
+
             return completion(.success(translations))
         }
 
         func handleTimeout() {
             guard canComplete else { return }
-            translations.append(contentsOf: inputs.filter { !translations.map(\.input).contains($0) }.map {
-                Translation(
-                    input: $0,
-                    output: $0.original.sanitized,
-                    languagePair: languagePair
-                )
-            })
+            translations.append(contentsOf: inputs
+                .filter { !translations.map(\.input).contains($0) }
+                .map {
+                    Translation(
+                        input: $0,
+                        output: $0.original.sanitized,
+                        languagePair: languagePair
+                    )
+                }
+            )
 
             guard exceptions.isEmpty else { return handleExceptionAndComplete() }
-            guard translations.count == inputs.count else { return completion(.failure(.unknown("Mismatched ratio returned."))) }
-            guard timeoutConfig.returnsInputsOnFailure else { return completion(.failure(.timedOut)) }
+            guard translations.count == inputs.count else {
+                return completion(.failure(
+                    .unknown("Mismatched ratio returned.")
+                ))
+            }
 
-            Logger.log(.timedOut(metadata: .init(sender: self)), domain: .Networking.hostedTranslation)
+            guard timeoutConfig.returnsInputsOnFailure else {
+                return completion(.failure(.timedOut))
+            }
+
+            Logger.log(
+                .timedOut(metadata: .init(sender: self)),
+                domain: .Networking.hostedTranslation
+            )
+
             completion(.success(translations))
         }
 
@@ -368,26 +473,32 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 // Purposefully ignoring HUD config argument so it can be handled here.
                 let translateResult = await translate(
                     input,
-                    with: languagePair
+                    with: languagePair,
+                    enhance: .init( // swiftlint:disable:next line_length
+                        additionalContext: "You are translating an alert message. Be sure to use a neutral tone and ensure consistency in pronoun usage and grammatical correctness."
+                    )
                 )
 
                 timeout.cancel()
                 timeout = Timeout(after: timeoutConfig.duration) { handleTimeout() }
 
                 switch translateResult {
-                case let .success(translation):
-                    translations.append(translation)
-
-                case let .failure(exception):
-                    exceptions.append(exception)
+                case let .success(translation): translations.append(translation)
+                case let .failure(exception): exceptions.append(exception)
                 }
             }
 
             guard canComplete else { return }
             guard exceptions.isEmpty else { return handleExceptionAndComplete() }
-            guard translations.count == inputs.count else { return completion(.failure(.unknown("Mismatched ratio returned."))) }
+            guard translations.count == inputs.count else {
+                return completion(.failure(
+                    .unknown("Mismatched ratio returned.")
+                ))
+            }
 
             completion(.success(translations))
         }
     }
 }
+
+// swiftlint:enable file_length type_body_length

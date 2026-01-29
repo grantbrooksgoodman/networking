@@ -13,7 +13,7 @@ import SwiftUI
 import AppSubsystem
 
 private struct NetworkActivityViewModifier: ViewModifier {
-    public func body(content: Content) -> some View {
+    func body(content: Content) -> some View {
         ZStack {
             content
             VStack {

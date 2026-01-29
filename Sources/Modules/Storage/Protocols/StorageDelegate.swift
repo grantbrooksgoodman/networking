@@ -117,7 +117,7 @@ public extension StorageDelegate {
         includeItemsInSubdirectories: Bool,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10),
+        timeout duration: Duration = .seconds(10)
     ) async -> Exception? {
         await downloadAllItems(
             at: path,
