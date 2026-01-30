@@ -102,54 +102,11 @@ final class GeminiService {
                 ))
             }
 
-            // TODO: Clean this up.
-
-            let outputComponents = enhancedOutput.components(separatedBy: " ")
-            let firstHalfOfOutput = outputComponents[0 ... outputComponents.count / 2]
-                .joined(separator: " ")
-
-            if enhancedOutput
-                .lowercasedTrimmingWhitespaceAndNewlines == translation
-                .output
-                .lowercasedTrimmingWhitespaceAndNewlines ||
-                (translation.output.count != enhancedOutput.count &&
-                    translation.output.hasPrefix(firstHalfOfOutput)) ||
-                translation.output.count > enhancedOutput.count {
-                return nil
-            }
-
-            let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last ?? ""
-            let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last ?? ""
-
-            guard await LanguageRecognitionService.shared.matchConfidence(
-                for: lastEnhancedOutputWord,
-                inLanguage: translation.languagePair.to
-            ) >= LanguageRecognitionService.shared.matchConfidence(
-                for: lastOriginalOutputWord,
-                inLanguage: translation.languagePair.to
-            ) else {
-                return nil
-            }
-
-            guard await LanguageRecognitionService.shared.matchConfidence(
-                for: enhancedOutput,
-                inLanguage: translation.languagePair.to
-            ) >= LanguageRecognitionService.shared.matchConfidence(
-                for: translation.output,
-                inLanguage: translation.languagePair.to
-            ) else {
-                return nil
-            }
-
-            guard await LanguageRecognitionService.shared.matchConfidence(
-                for: enhancedOutput,
-                inLanguage: translation.languagePair.to
-            ) > 0.8 else {
-                return .failure(.init(
-                    "Enhanced translation is not in target language.",
-                    userInfo: ["EnhancedTranslationOutput": enhancedOutput],
-                    metadata: .init(sender: self)
-                ))
+            if let exception = await validateEnhancedOutput(
+                for: translation,
+                enhancedOutput: enhancedOutput
+            ) {
+                return .failure(exception)
             }
 
             Logger.log(.init(
@@ -200,19 +157,14 @@ final class GeminiService {
 
         var userPrompt = """
         Original input (in \(sourceLanguageName)): '\(translation.input.value)'
+        Original translation output: '\(translation.output)'
         Target language: \(targetLanguageName)
         """
 
         if let additionalContext = configuration.additionalContext,
            !additionalContext.isEmpty {
-            userPrompt += "\nAdditional context: \(additionalContext)"
+            userPrompt += "\n-----\nADDITIONAL CONTEXT:\n\n\(additionalContext)"
         }
-
-        userPrompt += """
-
-        Raw translation:
-        \(translation.output)
-        """
 
         return .init(
             systemInstruction: .systemPrompt(systemPrompt),
@@ -285,5 +237,112 @@ final class GeminiService {
                 metadata: .init(sender: self)
             ))
         }
+    }
+
+    private func validateEnhancedOutput(
+        for translation: Translation,
+        enhancedOutput: String
+    ) async -> Exception? {
+        let languageRecognitionService = LanguageRecognitionService.shared
+        let normalizedEnhancedOutput = enhancedOutput.normalized
+        let normalizedOriginalOutput = translation.output.normalized
+
+        if normalizedEnhancedOutput == normalizedOriginalOutput {
+            return .init(
+                "Normalized outputs are equal.",
+                isReportable: false,
+                metadata: .init(sender: self)
+            )
+        }
+
+        if normalizedOriginalOutput.count > normalizedEnhancedOutput.count {
+            return .init(
+                "Original output is longer than enhanced version.",
+                isReportable: false,
+                userInfo: [
+                    "EnhancedTranslationOutput": enhancedOutput,
+                    "OriginalTranslationOutput": translation.output,
+                ],
+                metadata: .init(sender: self)
+            )
+        }
+
+        if translation.output.count != enhancedOutput.count,
+           translation.output.hasPrefix(
+               enhancedOutput.halfOfWhitespaceSeparatedComponents
+           ) {
+            return .init(
+                "Mismatched terminator in enhanced output.",
+                isReportable: false,
+                userInfo: [
+                    "EnhancedTranslationOutput": enhancedOutput,
+                    "OriginalTranslationOutput": translation.output,
+                ],
+                metadata: .init(sender: self)
+            )
+        }
+
+        if await LanguageRecognitionService.shared.matchConfidence(
+            for: enhancedOutput,
+            inLanguage: translation.languagePair.to
+        ) <= 0.8 {
+            return .init(
+                "Enhanced translation is not confidently in target language.",
+                isReportable: false,
+                userInfo: ["EnhancedTranslationOutput": enhancedOutput],
+                metadata: .init(sender: self)
+            )
+        }
+
+        if await languageRecognitionService.matchConfidence(
+            for: enhancedOutput,
+            inLanguage: translation.languagePair.to
+        ) < languageRecognitionService.matchConfidence(
+            for: translation.output,
+            inLanguage: translation.languagePair.to
+        ) {
+            return .init(
+                "Had greater confidence in original output.",
+                isReportable: false,
+                userInfo: [
+                    "EnhancedTranslationOutput": enhancedOutput,
+                    "OriginalTranslationOutput": translation.output,
+                ],
+                metadata: .init(sender: self)
+            )
+        }
+
+        if let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last,
+           let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last,
+           await languageRecognitionService.matchConfidence(
+               for: lastEnhancedOutputWord,
+               inLanguage: translation.languagePair.to
+           ) < languageRecognitionService.matchConfidence(
+               for: lastOriginalOutputWord,
+               inLanguage: translation.languagePair.to
+           ) {
+            return .init(
+                "Had greater confidence in last word of original output.",
+                isReportable: false,
+                userInfo: [
+                    "LastEnhancedOutputWord": lastEnhancedOutputWord,
+                    "LastOriginalOutputWord": lastOriginalOutputWord,
+                ],
+                metadata: .init(sender: self)
+            )
+        }
+
+        return nil
+    }
+}
+
+private extension String {
+    var halfOfWhitespaceSeparatedComponents: String {
+        let components = components(separatedBy: " ")
+        return String(components[0 ... components.count / 2].joined(separator: " "))
+    }
+
+    var normalized: String {
+        lowercasedTrimmingWhitespaceAndNewlines
     }
 }

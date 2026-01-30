@@ -50,7 +50,7 @@ public extension Networking {
         package var authDelegate: AuthDelegate = Auth()
         package var databaseDelegate: DatabaseDelegate = Database()
         package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate?
-        package var hostedTranslationDelegate: HostedTranslationDelegate = HostedTranslationService()
+        package var hostedTranslationDelegate: HostedTranslationDelegate = HostedTranslationService.shared
         package var storageDelegate: StorageDelegate = Storage()
 
         /* MARK: Computed Properties */

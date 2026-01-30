@@ -15,24 +15,38 @@ import AlertKit
 import AppSubsystem
 import Translator
 
-struct HostedTranslationService: HostedTranslationDelegate {
+final class HostedTranslationService: HostedTranslationDelegate {
     // MARK: - Types
 
     private enum ArchiveTreatment {
+        case addToBothArchives
         case addToHostedArchive
         case addToLocalArchive
-        case addToBothArchives
     }
 
     // MARK: - Dependencies
 
+    @Dependency(\.build) private var build: Build
     @Dependency(\.languageRecognitionService) private var languageRecognitionService: LanguageRecognitionService
     @Dependency(\.translationArchiverDelegate) private var localTranslationArchiver: TranslationArchiverDelegate
     @Dependency(\.translationService) private var translator: TranslationService
 
     // MARK: - Properties
 
+    static let shared = HostedTranslationService()
+
+    @LockIsolated var geminiCataloguedTranslationInputs = Set<String>() {
+        didSet {
+            @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
+            persistedArchive = geminiCataloguedTranslationInputs.isEmpty ? nil : geminiCataloguedTranslationInputs
+        }
+    }
+
     private let archiver = HostedTranslationArchiver()
+
+    // MARK: - Init
+
+    private init() {}
 
     // MARK: - Find Archived Translation
 
@@ -252,23 +266,31 @@ struct HostedTranslationService: HostedTranslationDelegate {
         var translation = translation
 
         if let enhancementConfig,
-           translation.input.value != translation.output,
-           !translation.languagePair.isIdempotent,
-           translation.output.count <= 200 {
+           !geminiCataloguedTranslationInputs.contains(translation.input.value),
+           Networking.config.geminiAPIKeyDelegate?.apiKey.isBlank == false,
+           translation.isEligibleForAIEnhancement {
             let enhanceResult = await GeminiService.shared.enhance(
                 translation,
                 using: enhancementConfig
             )
 
+            geminiCataloguedTranslationInputs.insert(translation.input.value)
             if let enhanceResult {
                 switch enhanceResult {
                 case let .success(enhancedTranslation): translation = enhancedTranslation
                 case let .failure(exception):
                     Logger.log(
                         exception,
-                        domain: .Networking.hostedTranslation,
-                        with: .toastInPrerelease
+                        domain: .Networking.hostedTranslation
                     )
+
+                    if build.milestone != .generalRelease {
+                        Toast.show(.init(
+                            .capsule(style: .warning),
+                            message: exception.userFacingDescriptor,
+                            perpetuation: .ephemeral(.seconds(3))
+                        ))
+                    }
                 }
             }
         }
@@ -390,6 +412,35 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         }
     }
 
+    private func getAdditionalContext(
+        for translations: [Translation]
+    ) -> String {
+        var concatenatedOutputs: String {
+            translations.reduce(into: [String]()) { partialResult, translation in
+                partialResult.append("'\(translation.output)'")
+            }.joined(separator: "\n").sanitized
+        }
+
+        let dynamicContextSuffix = [
+            build.finalName,
+            build.codeName,
+        ].first { !$0.isBlank }.map { " for an app called \($0)." } ?? "."
+
+        var additionalContext = """
+        You are translating a system alert message\(dynamicContextSuffix)
+        Be sure to use an appropriate, respectful, and neutral tone.
+        Ensure consistency in pronoun usage and grammatical correctness. 
+        Use infinitive forms for user actions where it makes sense (e.g., use 'Cerrar' in place of 'Cierra' for Spanish).
+        """
+
+        if !concatenatedOutputs.isBlank {
+            additionalContext += "\nHere is what else has been translated in this batch so far – separated by newlines – for additional context:\n"
+            additionalContext += concatenatedOutputs
+        }
+
+        return additionalContext
+    }
+
     private func getTranslations(
         _ inputs: [TranslationInput],
         languagePair: LanguagePair,
@@ -474,8 +525,8 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 let translateResult = await translate(
                     input,
                     with: languagePair,
-                    enhance: .init( // swiftlint:disable:next line_length
-                        additionalContext: "You are translating an alert message. Be sure to use a neutral tone and ensure consistency in pronoun usage and grammatical correctness."
+                    enhance: .init(
+                        additionalContext: getAdditionalContext(for: translations)
                     )
                 )
 
@@ -498,6 +549,18 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
 
             completion(.success(translations))
         }
+    }
+}
+
+private extension Translation {
+    var isEligibleForAIEnhancement: Bool {
+        guard !isAIEnhanced,
+              input.value != output,
+              !input.value.containsAnyCharacter(in: "⁂⌘※"),
+              !languagePair.isIdempotent,
+              !output.containsAnyCharacter(in: "⁂⌘※"),
+              output.count <= 200 else { return false }
+        return true
     }
 }
 

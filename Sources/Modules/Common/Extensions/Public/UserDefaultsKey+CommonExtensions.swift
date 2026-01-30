@@ -15,6 +15,7 @@ public extension UserDefaultsKey {
     // MARK: - Types
 
     enum NetworkingDefaultsKey: String {
+        case geminiCataloguedTranslationInputs
         case isNetworkActivityIndicatorEnabled
         case networkEnvironment
     }
