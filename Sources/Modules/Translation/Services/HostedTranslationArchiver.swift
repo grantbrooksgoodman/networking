@@ -94,8 +94,14 @@ final class HostedTranslationArchiver {
             return .success(translation)
 
         case let .failure(exception):
-            guard exception.isEqual(to: .Networking.Database.noValueExists) else { return .failure(exception) }
-            return await deriveTranslation(input: input, languagePair: languagePair)
+            guard exception.isEqual(
+                to: .Networking.Database.noValueExists
+            ) else { return .failure(exception) }
+            return await deriveTranslation(
+                input: input,
+                inputValueEncodedHash: input.value.encodedHash,
+                languagePair: languagePair
+            )
         }
     }
 
@@ -111,6 +117,24 @@ final class HostedTranslationArchiver {
             metadata: .init(sender: self)
         ) {
             return .failure(exception.appending(userInfo: userInfo))
+        }
+
+        if translationDataSample != .empty,
+           !translationDataSample.isExpired,
+           let dataForLanguagePair = translationDataSample
+           .data
+           .first(where: { $0.key == languagePair.string })?
+           .value as? [String: String],
+           let components = dataForLanguagePair
+           .first(where: { $0.key == inputValueEncodedHash })?
+           .value
+           .decodedTranslationComponents {
+            // NIT: Theoretically, we should have these in the archive already.
+            return .success(.init(
+                input: .init(components.input),
+                output: components.output,
+                languagePair: languagePair
+            ))
         }
 
         let getValuesResult = await database.getValues(at: path)
@@ -144,7 +168,14 @@ final class HostedTranslationArchiver {
             )
 
         case let .failure(exception):
-            return .failure(exception.appending(userInfo: userInfo))
+            guard exception.isEqual(
+                to: .Networking.Database.noValueExists
+            ) else { return .failure(exception.appending(userInfo: userInfo)) }
+            return await deriveTranslation(
+                input: nil,
+                inputValueEncodedHash: inputValueEncodedHash,
+                languagePair: languagePair
+            )
         }
     }
 
@@ -171,14 +202,14 @@ final class HostedTranslationArchiver {
     // MARK: - Auxiliary
 
     private func deriveTranslation(
-        input originalInput: TranslationInput,
+        input originalInput: TranslationInput?,
+        inputValueEncodedHash originalInputHash: String,
         languagePair originalLanguagePair: LanguagePair
     ) async -> Callback<Translation, Exception> {
-        if let exception = await populateTranslationDataSnapshot() {
+        if let exception = await populateTranslationDataSnapshot(expiryThreshold: .seconds(120)) {
             return .failure(exception)
         }
 
-        let originalInputHash = originalInput.value.encodedHash
         for (archivedLanguagePairData, archivedTranslationData) in translationDataSample.data {
             guard let archivedLanguagePair = LanguagePair(archivedLanguagePairData),
                   let sourceLanguageTranslationData = archivedTranslationData as? [String: String],
@@ -189,7 +220,7 @@ final class HostedTranslationArchiver {
                   let targetLanguageTranslationComponents = targetLanguageTranslation.decodedTranslationComponents else { continue }
 
             let derivedTranslation = Translation(
-                input: .init(originalInput.value),
+                input: .init(originalInput?.value ?? targetLanguageTranslationComponents.input),
                 output: targetLanguageTranslationComponents.output,
                 languagePair: originalLanguagePair
             )
@@ -223,7 +254,7 @@ final class HostedTranslationArchiver {
         ))
     }
 
-    private func populateTranslationDataSnapshot(expiryThreshold: Duration = .seconds(120)) async -> Exception? {
+    private func populateTranslationDataSnapshot(expiryThreshold: Duration) async -> Exception? {
         guard !isPopulatingTranslationDataSample,
               translationDataSample.isExpired || translationDataSample == .empty else { return nil }
 
@@ -240,19 +271,47 @@ final class HostedTranslationArchiver {
                 )
             }
 
-            for (key, value) in dictionary {
+            for (languagePairKey, value) in dictionary {
                 for (translationKey, translationValue) in value {
                     CoreDatabaseStore.addValue(
                         .init(
                             data: translationValue,
                             expiresAfter: .seconds(600)
                         ),
-                        forKey: "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/\(key)/\(translationKey)"
+                        forKey: "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/\(languagePairKey)/\(translationKey)"
                     )
                 }
             }
 
-            translationDataSample = .init(data: dictionary, expiresAfter: expiryThreshold)
+            translationDataSample = .init(
+                data: dictionary,
+                expiresAfter: expiryThreshold
+            )
+
+            Task.detached(priority: .utility) {
+                self.localTranslationArchiver.addValues(
+                    self.translationDataSample
+                        .data
+                        .reduce(into: Set<Translation>()) { partialResult, dictionary in
+                            if let languagePair = LanguagePair(dictionary.key),
+                               let dataForLanguagePair = dictionary.value as? [String: String] {
+                                partialResult.formUnion(
+                                    dataForLanguagePair
+                                        .values
+                                        .compactMap(\.decodedTranslationComponents)
+                                        .map {
+                                            Translation(
+                                                input: .init($0.input),
+                                                output: $0.output,
+                                                languagePair: languagePair
+                                            )
+                                        }
+                                )
+                            }
+                        }
+                )
+            }
+
             isPopulatingTranslationDataSample = false
             return nil
 

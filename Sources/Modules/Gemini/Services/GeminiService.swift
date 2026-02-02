@@ -109,16 +109,6 @@ final class GeminiService {
                 return .failure(exception)
             }
 
-            Logger.log(.init(
-                "Successfully AI-enhanced translation.",
-                isReportable: false,
-                userInfo: [
-                    "OriginalOutput": translation.output,
-                    "EnhancedOutput": enhancedOutput,
-                ],
-                metadata: .init(sender: self)
-            ), domain: .Networking.hostedTranslation)
-
             return .success(.init(
                 input: translation.input,
                 output: "※\(enhancedOutput)",

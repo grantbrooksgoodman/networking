@@ -27,6 +27,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
     // MARK: - Dependencies
 
     @Dependency(\.build) private var build: Build
+    @Dependency(\.coreKit) private var core: CoreKit
     @Dependency(\.languageRecognitionService) private var languageRecognitionService: LanguageRecognitionService
     @Dependency(\.translationArchiverDelegate) private var localTranslationArchiver: TranslationArchiverDelegate
     @Dependency(\.translationService) private var translator: TranslationService
@@ -70,7 +71,10 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
         let getTranslationsResult = await getTranslations(
             for: strings.keyPairs.map(\.input),
-            languagePair: .system
+            languagePair: .system,
+            enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
+                additionalContext: getAdditionalContext(for: nil)
+            ) : nil
         )
 
         switch getTranslationsResult {
@@ -266,6 +270,8 @@ final class HostedTranslationService: HostedTranslationDelegate {
         var translation = translation
 
         if let enhancementConfig,
+           archiveTreatment != nil,
+           core.utils.isEnhancedDialogTranslationEnabled,
            !geminiCataloguedTranslationInputs.contains(translation.input.value),
            Networking.config.geminiAPIKeyDelegate?.apiKey.isBlank == false,
            translation.isEligibleForAIEnhancement {
@@ -274,17 +280,44 @@ final class HostedTranslationService: HostedTranslationDelegate {
                 using: enhancementConfig
             )
 
-            geminiCataloguedTranslationInputs.insert(translation.input.value)
+            geminiCataloguedTranslationInputs.insert(
+                translation.input.value
+            )
+
             if let enhanceResult {
                 switch enhanceResult {
-                case let .success(enhancedTranslation): translation = enhancedTranslation
+                case let .success(enhancedTranslation):
+                    Logger.log(.init(
+                        "Successfully AI-enhanced translation.",
+                        isReportable: false,
+                        userInfo: [
+                            "OriginalOutput": translation.output,
+                            "EnhancedOutput": enhancedTranslation.output,
+                        ],
+                        metadata: .init(sender: self)
+                    ), domain: .Networking.hostedTranslation)
+
+                    if build.milestone != .generalRelease,
+                       core.utils.enhancedTranslationStatusVerbosity == .successAndErrors ||
+                       core.utils.enhancedTranslationStatusVerbosity == .successOnly {
+                        Toast.show(.init(
+                            .banner(style: .success),
+                            title: "Successfully AI-enhanced translation.",
+                            message: "Changed \"\(translation.output)\" to \"\(enhancedTranslation.output.sanitized)\"."
+                        ))
+                    }
+
+                    translation = enhancedTranslation
+
                 case let .failure(exception):
                     Logger.log(
                         exception,
                         domain: .Networking.hostedTranslation
                     )
 
-                    if build.milestone != .generalRelease {
+                    if build.milestone != .generalRelease,
+                       core.utils.enhancedTranslationStatusVerbosity == .errorsOnly ||
+                       core.utils.enhancedTranslationStatusVerbosity == .successAndErrors {
                         Toast.show(.init(
                             .capsule(style: .warning),
                             message: exception.userFacingDescriptor,
@@ -413,10 +446,10 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
     }
 
     private func getAdditionalContext(
-        for translations: [Translation]
+        for translations: [Translation]?
     ) -> String {
-        var concatenatedOutputs: String {
-            translations.reduce(into: [String]()) { partialResult, translation in
+        var concatenatedOutputs: String? {
+            translations?.reduce(into: [String]()) { partialResult, translation in
                 partialResult.append("'\(translation.output)'")
             }.joined(separator: "\n").sanitized
         }
@@ -427,13 +460,14 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         ].first { !$0.isBlank }.map { " for an app called \($0)." } ?? "."
 
         var additionalContext = """
-        You are translating a system alert message\(dynamicContextSuffix)
+        You are translating text as part of standard, user-facing system dialogs\(dynamicContextSuffix)
         Be sure to use an appropriate, respectful, and neutral tone.
         Ensure consistency in pronoun usage and grammatical correctness. 
         Use infinitive forms for user actions where it makes sense (e.g., use 'Cerrar' in place of 'Cierra' for Spanish).
         """
 
-        if !concatenatedOutputs.isBlank {
+        if let concatenatedOutputs,
+           !concatenatedOutputs.isBlank {
             additionalContext += "\nHere is what else has been translated in this batch so far – separated by newlines – for additional context:\n"
             additionalContext += concatenatedOutputs
         }
@@ -448,13 +482,12 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         timeout timeoutConfig: AlertKit.TranslationTimeoutConfig,
         completion: @escaping (Result<[Translation], TranslationError>) -> Void
     ) {
-        @Dependency(\.coreKit) var core: CoreKit
         var didComplete = false
 
         if let hudConfig {
             core.gcd.after(hudConfig.appearsAfter) {
                 guard !didComplete else { return }
-                core.hud.showProgress(isModal: hudConfig.isModal)
+                self.core.hud.showProgress(isModal: hudConfig.isModal)
             }
         }
 
@@ -525,9 +558,9 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 let translateResult = await translate(
                     input,
                     with: languagePair,
-                    enhance: .init(
+                    enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
                         additionalContext: getAdditionalContext(for: translations)
-                    )
+                    ) : nil
                 )
 
                 timeout.cancel()
