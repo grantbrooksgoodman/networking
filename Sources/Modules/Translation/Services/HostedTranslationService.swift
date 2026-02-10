@@ -69,10 +69,14 @@ final class HostedTranslationService: HostedTranslationDelegate {
             return .success(strings.defaultOutputMap)
         }
 
+        let shouldEnhanceTranslation = core
+            .utils
+            .isEnhancedDialogTranslationEnabled && strings.keyPairs.count <= 5
+
         let getTranslationsResult = await getTranslations(
             for: strings.keyPairs.map(\.input),
             languagePair: .system,
-            enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
+            enhance: shouldEnhanceTranslation ? .init(
                 additionalContext: getAdditionalContext(for: nil)
             ) : nil
         )
@@ -141,8 +145,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
     ) async -> Callback<Translation, Exception> {
         let prevalidateInputResult = await prevalidateInput(
             input,
-            languagePair: languagePair,
-            enhancementConfig: enhancementConfig
+            languagePair: languagePair
         )
 
         if let prevalidateInputResult {
@@ -246,7 +249,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
             return await postProcess(
                 translation,
-                enhancementConfig: enhancementConfig,
+                enhancementConfig: nil,
                 archiveTreatment: .addToLocalArchive
             )
 
@@ -351,8 +354,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     private func prevalidateInput(
         _ input: TranslationInput,
-        languagePair: LanguagePair,
-        enhancementConfig: EnhancementConfiguration?
+        languagePair: LanguagePair
     ) async -> Callback<Translation, Exception>? {
         if let exception = TranslationValidator.validate(
             inputs: [input],
@@ -373,7 +375,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
             return await postProcess(
                 translation,
-                enhancementConfig: enhancementConfig,
+                enhancementConfig: nil,
                 archiveTreatment: nil
             )
         }
@@ -397,7 +399,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
             return await postProcess(
                 archivedTranslation,
-                enhancementConfig: enhancementConfig,
+                enhancementConfig: nil,
                 archiveTreatment: nil
             )
         }
@@ -417,7 +419,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
                     output: input.value.sanitized,
                     languagePair: languagePair
                 ),
-                enhancementConfig: enhancementConfig,
+                enhancementConfig: nil,
                 archiveTreatment: .addToBothArchives
             )
         }

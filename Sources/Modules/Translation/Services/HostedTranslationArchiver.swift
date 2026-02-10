@@ -220,7 +220,7 @@ final class HostedTranslationArchiver {
                   let targetLanguageTranslationComponents = targetLanguageTranslation.decodedTranslationComponents else { continue }
 
             let derivedTranslation = Translation(
-                input: .init(originalInput?.value ?? targetLanguageTranslationComponents.input),
+                input: .init(originalInput?.value ?? sourceLanguageTranslationComponents.input),
                 output: targetLanguageTranslationComponents.output,
                 languagePair: originalLanguagePair
             )
