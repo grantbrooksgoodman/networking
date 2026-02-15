@@ -45,6 +45,22 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     private let archiver = HostedTranslationArchiver()
 
+    // MARK: - Computed Properties
+
+    private var additionalContext: String {
+        let dynamicContextSuffix = [
+            build.finalName,
+            build.codeName,
+        ].first { !$0.isBlank }.map { " for an app called \($0)." } ?? "."
+
+        return """
+        You are translating text as part of standard, user-facing system dialogs\(dynamicContextSuffix)
+        Be sure to use an appropriate, respectful, and neutral tone.
+        Ensure consistency in pronoun usage and grammatical correctness. 
+        Use infinitive forms for user actions where it makes sense (e.g., use 'cerrar' in place of 'cierra' for Spanish).
+        """
+    }
+
     // MARK: - Init
 
     private init() {}
@@ -77,7 +93,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
             for: strings.keyPairs.map(\.input),
             languagePair: .system,
             enhance: shouldEnhanceTranslation ? .init(
-                additionalContext: getAdditionalContext(for: nil)
+                additionalContext: additionalContext
             ) : nil
         )
 
@@ -111,30 +127,117 @@ final class HostedTranslationService: HostedTranslationDelegate {
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
         enhance enhancementConfig: EnhancementConfiguration?
     ) async -> Callback<[Translation], Exception> {
-        var translations = [Translation]()
+        var archiveMisses = [(
+            index: Int,
+            input: TranslationInput
+        )]()
 
-        for input in inputs {
-            let translateResult = await translate(
+        var resolvedTranslations: [Translation?] = Array(
+            repeating: nil,
+            count: inputs.count
+        )
+
+        for (index, input) in inputs.enumerated() {
+            if let prevalidateInputResult = await prevalidateInput(
                 input,
-                with: languagePair,
-                hud: hudConfig,
-                enhance: enhancementConfig
-            )
+                languagePair: languagePair
+            ) {
+                switch prevalidateInputResult {
+                case let .success(translation):
+                    resolvedTranslations[index] = translation
+                    continue
 
-            switch translateResult {
-            case let .success(translation): translations.append(translation)
-            case let .failure(exception): return .failure(exception)
+                case let .failure(exception):
+                    return .failure(exception)
+                }
             }
+
+            if let checkHostedArchiveResult = await checkHostedArchive(
+                for: input,
+                languagePair: languagePair,
+                enhancementConfig: enhancementConfig
+            ) {
+                switch checkHostedArchiveResult {
+                case let .success(translation):
+                    resolvedTranslations[index] = translation
+                    continue
+
+                case let .failure(exception):
+                    return .failure(exception)
+                }
+            }
+
+            // This input needs translation.
+            archiveMisses.append((index, input))
         }
 
-        guard translations.count == inputs.count else {
+        if archiveMisses.isEmpty {
+            return .success(resolvedTranslations.compactMap(\.self))
+        }
+
+        // TODO: Audit this.
+        // Networking.config.activityIndicatorDelegate.show()
+        // defer { Networking.config.activityIndicatorDelegate.hide() }
+
+        let missedInputs = archiveMisses.map {
+            TranslationInput(
+                $0.input.value.trimmingTrailingWhitespace,
+                alternate: $0.input.alternate?.trimmingTrailingWhitespace
+            )
+        }
+
+        let getTranslationsResult = await translator.getTranslations(
+            missedInputs,
+            languagePair: languagePair
+        )
+
+        switch getTranslationsResult {
+        case let .success(translations):
+            guard translations.count == archiveMisses.count else {
+                return .failure(.init(
+                    "Mismatched ratio returned.",
+                    metadata: .init(sender: self)
+                ))
+            }
+
+            for (slot, translation) in zip(archiveMisses, translations) {
+                let postProcessResult = await postProcess(
+                    translation,
+                    enhancementConfig: enhancementConfig,
+                    archiveTreatment: .addToBothArchives
+                )
+
+                switch postProcessResult {
+                case let .success(processedTranslation):
+                    let processedTranslation = Translation(
+                        input: inputs[slot.index],
+                        output: processedTranslation.output,
+                        languagePair: processedTranslation.languagePair
+                    )
+
+                    resolvedTranslations[slot.index] = processedTranslation
+
+                case let .failure(exception):
+                    return .failure(exception)
+                }
+            }
+
+            let finalTranslations = resolvedTranslations.compactMap(\.self)
+            guard finalTranslations.count == inputs.count else {
+                return .failure(.init(
+                    "Mismatched ratio returned.",
+                    metadata: .init(sender: self)
+                ))
+            }
+
+            return .success(finalTranslations)
+
+        case let .failure(error):
             return .failure(.init(
-                "Mismatched ratio returned.",
+                error,
                 metadata: .init(sender: self)
             ))
         }
-
-        return .success(translations)
     }
 
     func translate(
@@ -447,36 +550,6 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         }
     }
 
-    private func getAdditionalContext(
-        for translations: [Translation]?
-    ) -> String {
-        var concatenatedOutputs: String? {
-            translations?.reduce(into: [String]()) { partialResult, translation in
-                partialResult.append("'\(translation.output)'")
-            }.joined(separator: "\n").sanitized
-        }
-
-        let dynamicContextSuffix = [
-            build.finalName,
-            build.codeName,
-        ].first { !$0.isBlank }.map { " for an app called \($0)." } ?? "."
-
-        var additionalContext = """
-        You are translating text as part of standard, user-facing system dialogs\(dynamicContextSuffix)
-        Be sure to use an appropriate, respectful, and neutral tone.
-        Ensure consistency in pronoun usage and grammatical correctness. 
-        Use infinitive forms for user actions where it makes sense (e.g., use 'Cerrar' in place of 'Cierra' for Spanish).
-        """
-
-        if let concatenatedOutputs,
-           !concatenatedOutputs.isBlank {
-            additionalContext += "\nHere is what else has been translated in this batch so far – separated by newlines – for additional context:\n"
-            additionalContext += concatenatedOutputs
-        }
-
-        return additionalContext
-    }
-
     private func getTranslations(
         _ inputs: [TranslationInput],
         languagePair: LanguagePair,
@@ -501,27 +574,48 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
             return true
         }
 
-        var exceptions = [Exception]()
+        var exception: Exception?
         var translations = [Translation]()
 
-        func handleExceptionAndComplete() {
-            let exception = exceptions.compiledException ?? .init(metadata: .init(sender: self))
-            guard timeoutConfig.returnsInputsOnFailure else {
+        func complete(timedOut: Bool) {
+            guard canComplete else { return }
+
+            if let exception {
+                guard timeoutConfig.returnsInputsOnFailure else {
+                    return completion(.failure(
+                        .unknown(exception.descriptor)
+                    ))
+                }
+
+                Logger.log(
+                    exception,
+                    domain: .Networking.hostedTranslation
+                )
+
+                return completion(.success(translations))
+            }
+
+            guard translations.count == inputs.count else {
                 return completion(.failure(
-                    .unknown(exception.descriptor)
+                    .unknown("Mismatched ratio returned.")
                 ))
             }
 
-            Logger.log(
-                exception,
-                domain: .Networking.hostedTranslation
-            )
+            if timedOut {
+                guard timeoutConfig.returnsInputsOnFailure else {
+                    return completion(.failure(.timedOut))
+                }
+
+                Logger.log(
+                    .timedOut(metadata: .init(sender: self)),
+                    domain: .Networking.hostedTranslation
+                )
+            }
 
             return completion(.success(translations))
         }
 
-        func handleTimeout() {
-            guard canComplete else { return }
+        let timeout = Timeout(after: timeoutConfig.duration) {
             translations.append(contentsOf: inputs
                 .filter { !translations.map(\.input).contains($0) }
                 .map {
@@ -533,56 +627,27 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 }
             )
 
-            guard exceptions.isEmpty else { return handleExceptionAndComplete() }
-            guard translations.count == inputs.count else {
-                return completion(.failure(
-                    .unknown("Mismatched ratio returned.")
-                ))
-            }
-
-            guard timeoutConfig.returnsInputsOnFailure else {
-                return completion(.failure(.timedOut))
-            }
-
-            Logger.log(
-                .timedOut(metadata: .init(sender: self)),
-                domain: .Networking.hostedTranslation
-            )
-
-            completion(.success(translations))
+            complete(timedOut: true)
         }
 
-        var timeout = Timeout(after: timeoutConfig.duration) { handleTimeout() }
-
         Task {
-            for input in inputs {
-                // Purposefully ignoring HUD config argument so it can be handled here.
-                let translateResult = await translate(
-                    input,
-                    with: languagePair,
-                    enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
-                        additionalContext: getAdditionalContext(for: translations)
-                    ) : nil
-                )
+            let getTranslationsResult = await getTranslations(
+                for: inputs,
+                languagePair: languagePair,
+                hud: nil,
+                enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
+                    additionalContext: additionalContext
+                ) : nil
+            )
 
-                timeout.cancel()
-                timeout = Timeout(after: timeoutConfig.duration) { handleTimeout() }
+            timeout.cancel()
 
-                switch translateResult {
-                case let .success(translation): translations.append(translation)
-                case let .failure(exception): exceptions.append(exception)
-                }
+            switch getTranslationsResult {
+            case let .success(_translations): translations = _translations
+            case let .failure(_exception): exception = _exception
             }
 
-            guard canComplete else { return }
-            guard exceptions.isEmpty else { return handleExceptionAndComplete() }
-            guard translations.count == inputs.count else {
-                return completion(.failure(
-                    .unknown("Mismatched ratio returned.")
-                ))
-            }
-
-            completion(.success(translations))
+            complete(timedOut: false)
         }
     }
 }
