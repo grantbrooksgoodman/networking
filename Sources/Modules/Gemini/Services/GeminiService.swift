@@ -13,6 +13,13 @@ import AppSubsystem
 import Translator
 
 final class GeminiService {
+    // MARK: - Types
+
+    private struct CacheKey: Hashable {
+        let enhancedOutput: String
+        let translation: Translation
+    }
+
     // MARK: - Dependencies
 
     @Dependency(\.jsonDecoder) private var jsonDecoder: JSONDecoder
@@ -22,6 +29,8 @@ final class GeminiService {
     // MARK: - Properties
 
     static let shared = GeminiService()
+
+    private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
 
     // MARK: - Init
 
@@ -233,20 +242,40 @@ final class GeminiService {
         for translation: Translation,
         enhancedOutput: String
     ) async -> Exception? {
+        let cacheKey = CacheKey(
+            enhancedOutput: enhancedOutput,
+            translation: translation
+        )
+
+        if let cachedValue = cachedEnhancedOutputValidationResults[cacheKey] {
+            return cachedValue
+        }
+
         let languageRecognitionService = LanguageRecognitionService.shared
         let normalizedEnhancedOutput = enhancedOutput.normalized
+        let normalizedOriginalInput = translation.input.value.normalized
         let normalizedOriginalOutput = translation.output.normalized
 
+        var exception: Exception?
+
         if normalizedEnhancedOutput == normalizedOriginalOutput {
-            return .init(
+            exception = .init(
                 "Normalized outputs are equal.",
                 isReportable: false,
                 metadata: .init(sender: self)
             )
-        }
-
-        if normalizedOriginalOutput.count > normalizedEnhancedOutput.count {
-            return .init(
+        } else if normalizedEnhancedOutput.contains(normalizedOriginalInput) {
+            exception = .init(
+                "Enhanced output contains original input.",
+                isReportable: false,
+                userInfo: [
+                    "EnhancedTranslationOutput": enhancedOutput,
+                    "OriginalTranslationInput": translation.input.value,
+                ],
+                metadata: .init(sender: self)
+            )
+        } else if normalizedOriginalOutput.count > normalizedEnhancedOutput.count {
+            exception = .init(
                 "Original output is longer than enhanced version.",
                 isReportable: false,
                 userInfo: [
@@ -255,13 +284,11 @@ final class GeminiService {
                 ],
                 metadata: .init(sender: self)
             )
-        }
-
-        if translation.output.count != enhancedOutput.count,
-           translation.output.hasPrefix(
-               enhancedOutput.halfOfWhitespaceSeparatedComponents
-           ) {
-            return .init(
+        } else if translation.output.count != enhancedOutput.count,
+                  translation.output.hasPrefix(
+                      enhancedOutput.halfOfWhitespaceSeparatedComponents
+                  ) {
+            exception = .init(
                 "Mismatched terminator in enhanced output.",
                 isReportable: false,
                 userInfo: [
@@ -270,28 +297,24 @@ final class GeminiService {
                 ],
                 metadata: .init(sender: self)
             )
-        }
-
-        if await LanguageRecognitionService.shared.matchConfidence(
+        } else if await LanguageRecognitionService.shared.matchConfidence(
             for: enhancedOutput,
             inLanguage: translation.languagePair.to
         ) <= 0.8 {
-            return .init(
+            exception = .init(
                 "Enhanced translation is not confidently in target language.",
                 isReportable: false,
                 userInfo: ["EnhancedTranslationOutput": enhancedOutput],
                 metadata: .init(sender: self)
             )
-        }
-
-        if await languageRecognitionService.matchConfidence(
+        } else if await languageRecognitionService.matchConfidence(
             for: enhancedOutput,
             inLanguage: translation.languagePair.to
         ) < languageRecognitionService.matchConfidence(
             for: translation.output,
             inLanguage: translation.languagePair.to
         ) {
-            return .init(
+            exception = .init(
                 "Had greater confidence in original output.",
                 isReportable: false,
                 userInfo: [
@@ -300,18 +323,16 @@ final class GeminiService {
                 ],
                 metadata: .init(sender: self)
             )
-        }
-
-        if let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last,
-           let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last,
-           await languageRecognitionService.matchConfidence(
-               for: lastEnhancedOutputWord,
-               inLanguage: translation.languagePair.to
-           ) < languageRecognitionService.matchConfidence(
-               for: lastOriginalOutputWord,
-               inLanguage: translation.languagePair.to
-           ) {
-            return .init(
+        } else if let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last,
+                  let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last,
+                  await languageRecognitionService.matchConfidence(
+                      for: lastEnhancedOutputWord,
+                      inLanguage: translation.languagePair.to
+                  ) < languageRecognitionService.matchConfidence(
+                      for: lastOriginalOutputWord,
+                      inLanguage: translation.languagePair.to
+                  ) {
+            exception = .init(
                 "Had greater confidence in last word of original output.",
                 isReportable: false,
                 userInfo: [
@@ -322,7 +343,8 @@ final class GeminiService {
             )
         }
 
-        return nil
+        cachedEnhancedOutputValidationResults[cacheKey] = exception
+        return exception
     }
 }
 
