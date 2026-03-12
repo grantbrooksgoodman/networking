@@ -228,8 +228,8 @@ final class CoreStorage {
             sender: self
         )
 
-        storedDownloadItemResults[metadata.filePath] = nil
-        storedItemExistsResults[metadata.filePath] = nil
+        $storedDownloadItemResults[metadata.filePath] = nil
+        $storedItemExistsResults[metadata.filePath] = nil
 
         if let exception = await _upload(
             data,
@@ -296,8 +296,8 @@ final class CoreStorage {
             sender: self
         )
 
-        storedDownloadItemResults[path] = nil
-        storedItemExistsResults[path] = nil
+        $storedDownloadItemResults[path] = nil
+        $storedItemExistsResults[path] = nil
 
         if let exception = await _deleteItem(at: path) {
             return .failure(exception)
@@ -313,8 +313,8 @@ final class CoreStorage {
     ) async -> Exception? {
         var exceptions = exceptions
 
-        storedDownloadItemResults[path] = nil
-        storedItemExistsResults[path] = nil
+        $storedDownloadItemResults[path] = nil
+        $storedItemExistsResults[path] = nil
 
         Networking.config.activityIndicatorDelegate.show()
         let getDirectoryListingResult = await getDirectoryListing(at: path)
@@ -419,7 +419,7 @@ final class CoreStorage {
             return .success(nil)
         }
 
-        storedDownloadItemResults[path] = .init(
+        $storedDownloadItemResults[path] = .init(
             data: localPath,
             expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: downloadItemStartDate))
         )
@@ -670,7 +670,7 @@ final class CoreStorage {
             }
 
             guard let exception else {
-                storedItemExistsResults[path] = .init(
+                $storedItemExistsResults[path] = .init(
                     data: itemType == .directory ? HostedItemType.directory : .file,
                     expiresAfter: .milliseconds(cacheExpiryMilliseconds)
                 )
@@ -761,13 +761,13 @@ final class CoreStorage {
         localPath: URL,
         networkPath: String
     ) -> Bool {
-        guard let storedDataSample = storedDownloadItemResults[networkPath] else { return false }
+        guard let storedDataSample = $storedDownloadItemResults[networkPath] else { return false }
 
         guard !storedDataSample.isExpired,
               let storedLocalPath = storedDataSample.data as? URL,
               storedLocalPath == localPath,
               fileManager.fileExists(atPath: localPath.path()) || fileManager.fileExists(atPath: localPath.path(percentEncoded: false)) else {
-            storedDownloadItemResults[networkPath] = nil
+            $storedDownloadItemResults[networkPath] = nil
             return false
         }
 
@@ -784,12 +784,12 @@ final class CoreStorage {
         itemType: HostedItemType,
         path: String
     ) -> Bool {
-        guard let storedDataSample = storedItemExistsResults[path] else { return false }
+        guard let storedDataSample = $storedItemExistsResults[path] else { return false }
 
         guard !storedDataSample.isExpired,
               let storedItemExistsResult = storedDataSample.data as? HostedItemType,
               storedItemExistsResult == itemType else {
-            storedItemExistsResults[path] = nil
+            $storedItemExistsResults[path] = nil
             return false
         }
 

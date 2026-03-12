@@ -36,12 +36,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     static let shared = HostedTranslationService()
 
-    @LockIsolated var geminiCataloguedTranslationInputs = Set<String>() {
-        didSet {
-            @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
-            persistedArchive = geminiCataloguedTranslationInputs.isEmpty ? nil : geminiCataloguedTranslationInputs
-        }
-    }
+    @LockIsolated var geminiCataloguedTranslationInputs = Set<String>()
 
     private let archiver = HostedTranslationArchiver()
 
@@ -368,6 +363,13 @@ final class HostedTranslationService: HostedTranslationDelegate {
         }
     }
 
+    private func persistCataloguedInputs() {
+        @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
+        $geminiCataloguedTranslationInputs.withValue {
+            persistedArchive = $0.isEmpty ? nil : $0
+        }
+    }
+
     private func postProcess(
         _ translation: Translation,
         enhancementConfig: EnhancementConfiguration?,
@@ -378,7 +380,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
         if let enhancementConfig,
            archiveTreatment != nil,
            core.utils.isEnhancedDialogTranslationEnabled,
-           !geminiCataloguedTranslationInputs.contains(translation.input.value),
+           !$geminiCataloguedTranslationInputs.contains(translation.input.value),
            Networking.config.geminiAPIKeyDelegate?.apiKey.isBlank == false,
            translation.isEligibleForAIEnhancement {
             let enhanceResult = await GeminiService.shared.enhance(
@@ -386,9 +388,8 @@ final class HostedTranslationService: HostedTranslationDelegate {
                 using: enhancementConfig
             )
 
-            geminiCataloguedTranslationInputs.insert(
-                translation.input.value
-            )
+            $geminiCataloguedTranslationInputs.insert(translation.input.value)
+            persistCataloguedInputs()
 
             if let enhanceResult {
                 switch enhanceResult {

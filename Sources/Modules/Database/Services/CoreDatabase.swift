@@ -23,23 +23,30 @@ public enum CoreDatabaseStore {
 
     // MARK: - Methods
 
-    public static func addValue(_ value: DataSample, forKey key: String) {
-        storedDataSamples[key] = value
+    public static func addValue(
+        _ value: DataSample,
+        forKey key: String
+    ) {
+        $storedDataSamples[key] = value
     }
 
     public static func clearStore() {
         storedDataSamples = [:]
     }
 
-    public static func filter(_ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool) {
-        storedDataSamples = storedDataSamples.filter { isIncluded($0) }
+    public static func filter(
+        _ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool
+    ) {
+        $storedDataSamples.withValue {
+            $0 = $0.filter { isIncluded($0) }
+        }
     }
 
     public static func getValue(forKey key: String) -> Any? {
-        guard let storedDataSample = storedDataSamples[key],
+        guard let storedDataSample = $storedDataSamples[key],
               !storedDataSample.isExpired,
               !(storedDataSample.data is NSNull) else {
-            storedDataSamples[key] = nil
+            $storedDataSamples[key] = nil
             return nil
         }
 
@@ -53,7 +60,7 @@ public enum CoreDatabaseStore {
     }
 
     public static func removeValue(forKey key: String) {
-        storedDataSamples[key] = nil
+        $storedDataSamples[key] = nil
     }
 }
 
