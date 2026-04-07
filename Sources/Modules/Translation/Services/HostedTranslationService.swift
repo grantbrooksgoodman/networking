@@ -80,14 +80,10 @@ final class HostedTranslationService: HostedTranslationDelegate {
             return .success(strings.defaultOutputMap)
         }
 
-        let shouldEnhanceTranslation = core
-            .utils
-            .isEnhancedDialogTranslationEnabled && strings.keyPairs.count <= 5
-
         let getTranslationsResult = await getTranslations(
             for: strings.keyPairs.map(\.input),
             languagePair: .system,
-            enhance: shouldEnhanceTranslation ? .init(
+            enhance: Networking.config.isEnhancedDialogTranslationEnabled ? .init(
                 additionalContext: additionalContext
             ) : nil
         )
@@ -195,26 +191,38 @@ final class HostedTranslationService: HostedTranslationDelegate {
                 ))
             }
 
-            for (slot, translation) in zip(archiveMisses, translations) {
-                let postProcessResult = await postProcess(
-                    translation,
-                    enhancementConfig: enhancementConfig,
-                    archiveTreatment: .addToBothArchives
-                )
+            var exception: Exception?
 
-                switch postProcessResult {
-                case let .success(processedTranslation):
-                    let processedTranslation = Translation(
-                        input: inputs[slot.index],
-                        output: processedTranslation.output,
-                        languagePair: processedTranslation.languagePair
-                    )
-
-                    resolvedTranslations[slot.index] = processedTranslation
-
-                case let .failure(exception):
-                    return .failure(exception)
+            await withTaskGroup(of: (Int, Callback<Translation, Exception>).self) { taskGroup in
+                for (slot, translation) in zip(archiveMisses, translations) {
+                    let slotIndex = slot.index
+                    taskGroup.addTask {
+                        await(slotIndex, self.postProcess(
+                            translation,
+                            enhancementConfig: enhancementConfig,
+                            archiveTreatment: .addToBothArchives
+                        ))
+                    }
                 }
+
+                for await(index, postProcessResult) in taskGroup {
+                    switch postProcessResult {
+                    case let .success(processedTranslation):
+                        resolvedTranslations[index] = Translation(
+                            input: inputs[index],
+                            output: processedTranslation.output,
+                            languagePair: processedTranslation.languagePair
+                        )
+
+                    case let .failure(_exception):
+                        exception = _exception
+                        taskGroup.cancelAll()
+                    }
+                }
+            }
+
+            if let exception {
+                return .failure(exception)
             }
 
             let finalTranslations = resolvedTranslations.compactMap(\.self)
@@ -379,7 +387,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
         if let enhancementConfig,
            archiveTreatment != nil,
-           core.utils.isEnhancedDialogTranslationEnabled,
+           Networking.config.isEnhancedDialogTranslationEnabled,
            !$geminiCataloguedTranslationInputs.contains(translation.input.value),
            Networking.config.geminiAPIKeyDelegate?.apiKey.isBlank == false,
            translation.isEligibleForAIEnhancement {
@@ -405,8 +413,8 @@ final class HostedTranslationService: HostedTranslationDelegate {
                     ), domain: .Networking.hostedTranslation)
 
                     if build.milestone != .generalRelease,
-                       core.utils.enhancedTranslationStatusVerbosity == .successAndErrors ||
-                       core.utils.enhancedTranslationStatusVerbosity == .successOnly {
+                       Networking.config.enhancedTranslationStatusVerbosity == .successAndErrors ||
+                       Networking.config.enhancedTranslationStatusVerbosity == .successOnly {
                         Toast.show(.init(
                             .banner(style: .success),
                             title: "Successfully AI-enhanced translation.",
@@ -423,8 +431,8 @@ final class HostedTranslationService: HostedTranslationDelegate {
                     )
 
                     if build.milestone != .generalRelease,
-                       core.utils.enhancedTranslationStatusVerbosity == .errorsOnly ||
-                       core.utils.enhancedTranslationStatusVerbosity == .successAndErrors {
+                       Networking.config.enhancedTranslationStatusVerbosity == .errorsOnly ||
+                       Networking.config.enhancedTranslationStatusVerbosity == .successAndErrors {
                         Toast.show(.init(
                             .capsule(style: .warning),
                             message: exception.userFacingDescriptor,
@@ -636,7 +644,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 for: inputs,
                 languagePair: languagePair,
                 hud: nil,
-                enhance: core.utils.isEnhancedDialogTranslationEnabled ? .init(
+                enhance: Networking.config.isEnhancedDialogTranslationEnabled ? .init(
                     additionalContext: additionalContext
                 ) : nil
             )

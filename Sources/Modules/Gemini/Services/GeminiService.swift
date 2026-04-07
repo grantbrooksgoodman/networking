@@ -30,7 +30,7 @@ final class GeminiService {
 
     static let shared = GeminiService()
 
-    private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
+    @LockIsolated private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
 
     // MARK: - Init
 
@@ -247,7 +247,8 @@ final class GeminiService {
             translation: translation
         )
 
-        if let cachedValue = cachedEnhancedOutputValidationResults[cacheKey] {
+        let cachedValue: Exception?? = $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] }
+        if let cachedValue {
             return cachedValue
         }
 
@@ -297,7 +298,7 @@ final class GeminiService {
                 ],
                 metadata: .init(sender: self)
             )
-        } else if await LanguageRecognitionService.shared.matchConfidence(
+        } else if await languageRecognitionService.matchConfidence(
             for: enhancedOutput,
             inLanguage: translation.languagePair.to
         ) <= 0.8 {
@@ -343,7 +344,7 @@ final class GeminiService {
             )
         }
 
-        cachedEnhancedOutputValidationResults[cacheKey] = exception
+        $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] = exception }
         return exception
     }
 }

@@ -46,6 +46,11 @@ public extension Networking {
 
         fileprivate static let shared = Config()
 
+        /// Determines verbosity level for AI-enhanced translation status messages.
+        public private(set) var enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?
+        /// When `true`, enables system dialog translations to be enhanced with artificial intelligence.
+        public private(set) var isEnhancedDialogTranslationEnabled = false
+
         package var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         package var authDelegate: AuthDelegate = Auth()
         package var databaseDelegate: DatabaseDelegate = Database()
@@ -78,6 +83,16 @@ public extension Networking {
         public func setEnvironment(_ environment: NetworkEnvironment) {
             @Persistent(.networkEnvironment) var persistedValue: NetworkEnvironment?
             persistedValue = environment
+        }
+
+        /* MARK: Enhanced Translation Configuraiton */
+
+        public func setEnhancedTranslationStatusVerbosity(_ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?) {
+            self.enhancedTranslationStatusVerbosity = enhancedTranslationStatusVerbosity
+        }
+
+        public func setIsEnhancedDialogTranslationEnabled(_ isEnhancedDialogTranslationEnabled: Bool) {
+            self.isEnhancedDialogTranslationEnabled = isEnhancedDialogTranslationEnabled
         }
 
         /* MARK: Delegate Registration */
