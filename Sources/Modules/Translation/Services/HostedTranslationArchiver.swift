@@ -19,10 +19,16 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     @Dependency(\.networking.database) private var database: DatabaseDelegate
     @Dependency(\.translationArchiverDelegate) private var localTranslationArchiver: TranslationArchiverDelegate
 
+    // MARK: - Types
+
+    private struct State {
+        var isPopulating = false
+        var translationDataSample: TranslationDataSample = .empty
+    }
+
     // MARK: - Properties
 
-    private var isPopulatingTranslationDataSample = false
-    private var translationDataSample: TranslationDataSample = .empty
+    @LockIsolated private var state = State()
 
     // MARK: - Init
 
@@ -119,9 +125,10 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             return .failure(exception.appending(userInfo: userInfo))
         }
 
-        if translationDataSample != .empty,
-           !translationDataSample.isExpired,
-           let dataForLanguagePair = translationDataSample
+        if $state.translationDataSample != .empty,
+           !$state.translationDataSample.isExpired,
+           let dataForLanguagePair = $state
+           .translationDataSample
            .data
            .first(where: { $0.key == languagePair.string })?
            .value as? [String: String],
@@ -210,12 +217,12 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             return .failure(exception)
         }
 
-        for (archivedLanguagePairData, archivedTranslationData) in translationDataSample.data {
+        for (archivedLanguagePairData, archivedTranslationData) in $state.translationDataSample.data {
             guard let archivedLanguagePair = LanguagePair(archivedLanguagePairData),
                   let sourceLanguageTranslationData = archivedTranslationData as? [String: String],
                   let sourceLanguageTranslation = sourceLanguageTranslationData.first(where: { $0.key == originalInputHash }),
                   let sourceLanguageTranslationComponents = sourceLanguageTranslation.value.decodedTranslationComponents,
-                  let targetLanguageTranslationData = translationDataSample.data["\(archivedLanguagePair.to)-\(originalLanguagePair.to)"],
+                  let targetLanguageTranslationData = $state.translationDataSample.data["\(archivedLanguagePair.to)-\(originalLanguagePair.to)"],
                   let targetLanguageTranslation = targetLanguageTranslationData[sourceLanguageTranslationComponents.output.encodedHash] as? String,
                   let targetLanguageTranslationComponents = targetLanguageTranslation.decodedTranslationComponents else { continue }
 
@@ -255,16 +262,21 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     }
 
     private func populateTranslationDataSnapshot(expiryThreshold: Duration) async -> Exception? {
-        guard !isPopulatingTranslationDataSample,
-              translationDataSample.isExpired || translationDataSample == .empty else { return nil }
+        let shouldProceed = $state.withValue { state in
+            guard !state.isPopulating,
+                  state.translationDataSample.isExpired ||
+                  state.translationDataSample == .empty else { return false }
+            state.isPopulating = true
+            return true
+        }
 
-        isPopulatingTranslationDataSample = true
+        guard shouldProceed else { return nil }
         let getValuesResult = await database.getValues(at: NetworkPath.translations.rawValue)
 
         switch getValuesResult {
         case let .success(values):
             guard let dictionary = values as? [String: [String: Any]] else {
-                isPopulatingTranslationDataSample = false
+                $state.withValue { $0.isPopulating = false }
                 return .Networking.typecastFailed(
                     "dictionary",
                     metadata: .init(sender: self)
@@ -283,14 +295,19 @@ final class HostedTranslationArchiver: @unchecked Sendable {
                 }
             }
 
-            translationDataSample = .init(
+            let translationDataSample = TranslationDataSample(
                 data: dictionary,
                 expiresAfter: expiryThreshold
             )
 
+            $state.withValue {
+                $0.translationDataSample = translationDataSample
+                $0.isPopulating = false
+            }
+
             Task.detached(priority: .utility) {
                 self.localTranslationArchiver.addValues(
-                    self.translationDataSample
+                    translationDataSample
                         .data
                         .reduce(into: Set<Translation>()) { partialResult, dictionary in
                             if let languagePair = LanguagePair(dictionary.key),
@@ -312,11 +329,10 @@ final class HostedTranslationArchiver: @unchecked Sendable {
                 )
             }
 
-            isPopulatingTranslationDataSample = false
             return nil
 
         case let .failure(exception):
-            isPopulatingTranslationDataSample = false
+            $state.withValue { $0.isPopulating = false }
             return exception
         }
     }

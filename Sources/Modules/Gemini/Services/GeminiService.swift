@@ -30,7 +30,7 @@ final actor GeminiService {
 
     static let shared = GeminiService()
 
-    @LockIsolated private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
+    private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
 
     // MARK: - Init
 
@@ -247,8 +247,7 @@ final actor GeminiService {
             translation: translation
         )
 
-        let cachedValue: Exception?? = $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] }
-        if let cachedValue {
+        if let cachedValue = cachedEnhancedOutputValidationResults[cacheKey] {
             return cachedValue
         }
 
@@ -344,7 +343,7 @@ final actor GeminiService {
             )
         }
 
-        $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] = exception }
+        cachedEnhancedOutputValidationResults[cacheKey] = exception
         return exception
     }
 }

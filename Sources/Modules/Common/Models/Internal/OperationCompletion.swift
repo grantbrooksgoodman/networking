@@ -14,8 +14,8 @@ import AppSubsystem
 final class OperationCompletion: @unchecked Sendable {
     // MARK: - Properties
 
-    private let didComplete = LockIsolated<Bool>(wrappedValue: false)
     private let body: (Callback<Any?, Exception>) -> Void
+    private let didComplete = LockIsolated<Bool>(wrappedValue: false)
 
     // MARK: - Init
 
@@ -32,7 +32,7 @@ final class OperationCompletion: @unchecked Sendable {
             return true
         }
 
-        guard shouldProceed else { return }
+        guard shouldProceed else { return } // TODO: Audit the commented line.
 //        Networking.config.activityIndicatorDelegate.hide()
         body(result)
     }

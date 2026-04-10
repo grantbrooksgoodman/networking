@@ -14,7 +14,7 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
-@preconcurrency import FirebaseDatabase
+import FirebaseDatabase
 
 public enum CoreDatabaseStore {
     // MARK: - Properties
@@ -78,7 +78,14 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private var globalCacheStrategy: CacheStrategy?
+    private var _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+
+    // MARK: - Computed Properties
+
+    private var globalCacheStrategy: CacheStrategy? {
+        get { _globalCacheStrategy.wrappedValue }
+        set { _globalCacheStrategy.projectedValue.withValue { $0 = newValue } }
+    }
 
     // MARK: - ID Key Generation
 

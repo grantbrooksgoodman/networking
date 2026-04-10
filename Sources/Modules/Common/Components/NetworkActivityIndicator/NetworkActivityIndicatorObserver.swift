@@ -23,7 +23,7 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
     let observedValues: [any ObservableProtocol] = [Observables.isNetworkActivityOccurring]
     let viewModel: ViewModel<NetworkActivityIndicatorReducer>
 
-    private var taskID = UUID()
+    @LockIsolated private var taskID = UUID()
 
     // MARK: - Init
 
@@ -65,8 +65,10 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
             self.taskID = taskID
 
             Task.delayed(by: .seconds(2)) {
-                guard taskID == taskID,
+                // swiftformat:disable all
+                guard taskID == self.taskID,
                       !Observables.isNetworkActivityOccurring.value else { return }
+                // swiftformat:enable all
                 send(.isVisibleChanged(false))
             }
 

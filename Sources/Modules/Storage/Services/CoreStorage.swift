@@ -14,7 +14,7 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
-@preconcurrency import FirebaseStorage
+import FirebaseStorage
 
 final class CoreStorage: @unchecked Sendable {
     // MARK: - Dependencies
@@ -25,9 +25,17 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private var globalCacheStrategy: CacheStrategy?
+    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+
     @LockIsolated private var storedDownloadItemResults = [String: DataSample]()
     @LockIsolated private var storedItemExistsResults = [String: DataSample]()
+
+    // MARK: - Computed Properties
+
+    private var globalCacheStrategy: CacheStrategy? {
+        get { _globalCacheStrategy.wrappedValue }
+        set { _globalCacheStrategy.projectedValue.withValue { $0 = newValue } }
+    }
 
     // MARK: - Global Cache Strategy
 

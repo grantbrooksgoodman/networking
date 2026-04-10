@@ -541,59 +541,88 @@ final class HostedTranslationService: HostedTranslationDelegate {
 }
 
 extension HostedTranslationService: AlertKit.TranslationDelegate {
+    // MARK: - Types
+
+    private enum GetTranslationsResult: @unchecked Sendable {
+        case completed(Callback<[Translation], Exception>)
+        case timedOut
+    }
+
+    // MARK: - Methods
+
     func getTranslations(
         _ inputs: [TranslationInput],
         languagePair: LanguagePair,
         hud hudConfig: AlertKit.HUDConfig?,
         timeout timeoutConfig: AlertKit.TranslationTimeoutConfig
     ) async -> Result<[Translation], TranslationError> {
-        await withCheckedContinuation { continuation in
-            getTranslations(
-                inputs,
-                languagePair: languagePair,
-                hud: hudConfig,
-                timeout: timeoutConfig
-            ) { result in
-                continuation.resume(returning: result)
-            }
-        }
-    }
-
-    private func getTranslations(
-        _ inputs: [TranslationInput],
-        languagePair: LanguagePair,
-        hud hudConfig: AlertKit.HUDConfig?,
-        timeout timeoutConfig: AlertKit.TranslationTimeoutConfig,
-        completion: @escaping (Result<[Translation], TranslationError>) -> Void
-    ) {
-        var didComplete = false
-
-        if let hudConfig {
-            Task.delayed(by: hudConfig.appearsAfter) { @MainActor in
-                guard !didComplete else { return }
-                self.core.hud.showProgress(isModal: hudConfig.isModal)
+        let hudTask: Task<Void, Never>? = hudConfig.map { hudConfig in
+            Task {
+                try? await Task.sleep(for: hudConfig.appearsAfter)
+                guard !Task.isCancelled else { return }
+                core.hud.showProgress(isModal: hudConfig.isModal)
             }
         }
 
-        var canComplete: Bool {
-            guard !didComplete else { return false }
-            didComplete = true
-            guard hudConfig != nil else { return true }
-            core.hud.hide()
-            return true
+        defer {
+            hudTask?.cancel()
+            if hudConfig != nil {
+                core.hud.hide()
+            }
         }
 
-        var exception: Exception?
-        var translations = [Translation]()
+        let getTranslationsResult: GetTranslationsResult = await withTaskGroup(
+            of: GetTranslationsResult.self
+        ) { taskGroup in
+            taskGroup.addTask {
+                let getTranslationsResult = await self.getTranslations(
+                    for: inputs,
+                    languagePair: languagePair,
+                    hud: nil,
+                    enhance: Networking.config.isEnhancedDialogTranslationEnabled ? .init(
+                        additionalContext: self.additionalContext
+                    ) : nil
+                )
 
-        func complete(timedOut: Bool) {
-            guard canComplete else { return }
+                return .completed(getTranslationsResult)
+            }
 
-            if let exception {
-                guard timeoutConfig.returnsInputsOnFailure else {
-                    return completion(.failure(
-                        .unknown(exception.descriptor)
+            taskGroup.addTask {
+                try? await Task.sleep(for: timeoutConfig.duration)
+                return .timedOut
+            }
+
+            for await getTranslationsResult in taskGroup {
+                taskGroup.cancelAll()
+                return getTranslationsResult
+            }
+
+            return .timedOut
+        }
+
+        let fallbackTranslations = inputs.map {
+            Translation(
+                input: $0,
+                output: $0.original.sanitized,
+                languagePair: languagePair
+            )
+        }
+
+        switch getTranslationsResult {
+        case let .completed(getTranslationsResult):
+            switch getTranslationsResult {
+            case let .success(translations):
+                guard translations.count == inputs.count else {
+                    return .failure(.unknown(
+                        "Mismatched ratio returned."
                     ))
+                }
+
+                return .success(translations)
+
+            case let .failure(exception):
+                guard timeoutConfig.returnsInputsOnFailure else {
+                    return .failure(.unknown(exception.descriptor))
                 }
 
                 Logger.log(
@@ -601,62 +630,20 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                     domain: .Networking.hostedTranslation
                 )
 
-                return completion(.success(translations))
+                return .success(fallbackTranslations)
             }
 
-            guard translations.count == inputs.count else {
-                return completion(.failure(
-                    .unknown("Mismatched ratio returned.")
-                ))
+        case .timedOut:
+            guard timeoutConfig.returnsInputsOnFailure else {
+                return .failure(.timedOut)
             }
 
-            if timedOut {
-                guard timeoutConfig.returnsInputsOnFailure else {
-                    return completion(.failure(.timedOut))
-                }
-
-                Logger.log(
-                    .timedOut(metadata: .init(sender: self)),
-                    domain: .Networking.hostedTranslation
-                )
-            }
-
-            return completion(.success(translations))
-        }
-
-        let timeout = Timeout(after: timeoutConfig.duration) {
-            translations.append(contentsOf: inputs
-                .filter { !translations.map(\.input).contains($0) }
-                .map {
-                    Translation(
-                        input: $0,
-                        output: $0.original.sanitized,
-                        languagePair: languagePair
-                    )
-                }
+            Logger.log(
+                .timedOut(metadata: .init(sender: self)),
+                domain: .Networking.hostedTranslation
             )
 
-            complete(timedOut: true)
-        }
-
-        Task {
-            let getTranslationsResult = await getTranslations(
-                for: inputs,
-                languagePair: languagePair,
-                hud: nil,
-                enhance: Networking.config.isEnhancedDialogTranslationEnabled ? .init(
-                    additionalContext: additionalContext
-                ) : nil
-            )
-
-            timeout.cancel()
-
-            switch getTranslationsResult {
-            case let .success(_translations): translations = _translations
-            case let .failure(_exception): exception = _exception
-            }
-
-            complete(timedOut: false)
+            return .success(fallbackTranslations)
         }
     }
 }
