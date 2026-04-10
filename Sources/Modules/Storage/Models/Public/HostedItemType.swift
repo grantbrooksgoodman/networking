@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-public enum HostedItemType {
+public enum HostedItemType: Sendable {
     case directory
     case file
 }

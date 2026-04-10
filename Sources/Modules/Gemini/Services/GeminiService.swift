@@ -12,7 +12,7 @@ import Foundation
 import AppSubsystem
 import Translator
 
-final class GeminiService {
+final actor GeminiService {
     // MARK: - Types
 
     private struct CacheKey: Hashable {

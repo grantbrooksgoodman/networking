@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-public struct NetworkPath: Hashable {
+public struct NetworkPath: Hashable, Sendable {
     // MARK: - Properties
 
     public let rawValue: String

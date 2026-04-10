@@ -34,7 +34,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     // MARK: - Properties
 
-    static let shared = HostedTranslationService()
+    nonisolated static let shared = HostedTranslationService()
 
     @LockIsolated var geminiCataloguedTranslationInputs = Set<String>()
 
@@ -58,7 +58,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     // MARK: - Init
 
-    private init() {}
+    private nonisolated init() {}
 
     // MARK: - Find Archived Translation
 
@@ -569,7 +569,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         var didComplete = false
 
         if let hudConfig {
-            core.gcd.after(hudConfig.appearsAfter) {
+            Task.delayed(by: hudConfig.appearsAfter) { @MainActor in
                 guard !didComplete else { return }
                 self.core.hud.showProgress(isModal: hudConfig.isModal)
             }

@@ -12,7 +12,7 @@ import UIKit
 /* Proprietary */
 import AppSubsystem
 
-final class NetworkActivityIndicatorObserver: Observer {
+final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
     // MARK: - Type Aliases
 
     typealias R = NetworkActivityIndicatorReducer
@@ -39,7 +39,6 @@ final class NetworkActivityIndicatorObserver: Observer {
 
     func onChange(of observable: Observable<Any>) {
         @Dependency(\.build) var build: Build
-        @Dependency(\.coreKit.gcd) var coreGCD: CoreKit.GCD
 
         Logger.log(
             "\(observable.value is Nil ? "Triggered" : "Observed change of") .\(observable.key.rawValue).",
@@ -65,10 +64,10 @@ final class NetworkActivityIndicatorObserver: Observer {
             let taskID = UUID()
             self.taskID = taskID
 
-            coreGCD.after(.seconds(2)) {
-                guard self.taskID == taskID,
+            Task.delayed(by: .seconds(2)) {
+                guard taskID == taskID,
                       !Observables.isNetworkActivityOccurring.value else { return }
-                self.send(.isVisibleChanged(false))
+                send(.isVisibleChanged(false))
             }
 
         default: ()

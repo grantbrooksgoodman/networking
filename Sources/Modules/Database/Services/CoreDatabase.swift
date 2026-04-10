@@ -14,12 +14,12 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
-import FirebaseDatabase
+@preconcurrency import FirebaseDatabase
 
 public enum CoreDatabaseStore {
     // MARK: - Properties
 
-    @LockIsolated private static var storedDataSamples = [String: DataSample]()
+    private static let storedDataSamples = LockIsolated<[String: DataSample]>(wrappedValue: [:])
 
     // MARK: - Methods
 
@@ -27,44 +27,50 @@ public enum CoreDatabaseStore {
         _ value: DataSample,
         forKey key: String
     ) {
-        $storedDataSamples[key] = value
+        storedDataSamples.projectedValue.withValue {
+            $0[key] = value
+        }
     }
 
     public static func clearStore() {
-        storedDataSamples = [:]
+        storedDataSamples.wrappedValue = [:]
     }
 
     public static func filter(
         _ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool
     ) {
-        $storedDataSamples.withValue {
+        storedDataSamples.projectedValue.withValue {
             $0 = $0.filter { isIncluded($0) }
         }
     }
 
     public static func getValue(forKey key: String) -> Any? {
-        guard let storedDataSample = $storedDataSamples[key],
-              !storedDataSample.isExpired,
-              !(storedDataSample.data is NSNull) else {
-            $storedDataSamples[key] = nil
-            return nil
+        storedDataSamples.projectedValue.withValue {
+            guard let storedDataSample = $0[key],
+                  !storedDataSample.isExpired,
+                  !(storedDataSample.data is NSNull) else {
+                $0[key] = nil
+                return nil
+            }
+
+            Logger.log(
+                "Returning stored value for data at path \"\(key)\".",
+                domain: .caches,
+                sender: self
+            )
+
+            return storedDataSample.data
         }
-
-        Logger.log(
-            "Returning stored value for data at path \"\(key)\".",
-            domain: .caches,
-            sender: self
-        )
-
-        return storedDataSample.data
     }
 
     public static func removeValue(forKey key: String) {
-        $storedDataSamples[key] = nil
+        storedDataSamples.projectedValue.withValue {
+            $0[key] = nil
+        }
     }
 }
 
-final class CoreDatabase {
+final class CoreDatabase: @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.firebaseDatabase) private var firebaseDatabase: DatabaseReference
@@ -157,84 +163,60 @@ final class CoreDatabase {
         }
 
         Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
 
-        var didComplete = false
-        var canComplete: Bool {
-            guard !didComplete else { return false }
-            didComplete = true
-            Networking.config.activityIndicatorDelegate.hide()
-            return true
-        }
-
+        let completion = OperationCompletion(completion)
         let timeout = Timeout(after: duration) {
-            guard canComplete else { return }
             completion(.failure(
                 .timedOut(metadata: .init(sender: self))
             ))
         }
 
-        switch operation {
-        case let .getValues(
-            atPath: path,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let getValuesResult = await getValues(
+        Task {
+            let result: Callback<Any?, Exception>
+
+            switch operation {
+            case let .getValues(
+                atPath: path,
+                cacheStrategy: cacheStrategy
+            ):
+                result = await getValues(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(getValuesResult)
-            }
-
-        case let .queryValues(
-            atPath: path,
-            strategy: strategy,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let queryValuesResult = await queryValues(
+            case let .queryValues(
+                atPath: path,
+                strategy: strategy,
+                cacheStrategy: cacheStrategy
+            ):
+                result = await queryValues(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     strategy: strategy,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(queryValuesResult)
-            }
-
-        case let .setValue(
-            value,
-            forKey: key
-        ):
-            Task {
-                let setValueResult = await setValue(
+            case let .setValue(
+                value,
+                forKey: key
+            ):
+                result = await setValue(
                     value,
                     forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(setValueResult)
-            }
-
-        case let .updateChildValues(
-            forKey: key,
-            withData: data
-        ):
-            Task {
-                let updateChildValuesResult = await updateChildValues(
+            case let .updateChildValues(
+                forKey: key,
+                withData: data
+            ):
+                result = await updateChildValues(
                     forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
                     with: data
                 )
-
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(updateChildValuesResult)
             }
+
+            timeout.cancel()
+            completion(result)
         }
     }
 

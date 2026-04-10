@@ -11,7 +11,7 @@ import Foundation
 /* 3rd-party */
 import FirebaseStorage
 
-public struct HostedItemMetadata {
+public struct HostedItemMetadata: Sendable {
     // MARK: - Properties
 
     public let filePath: String

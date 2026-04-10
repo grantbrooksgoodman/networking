@@ -26,7 +26,9 @@ public extension CacheDomain {
         }
 
         private static func clearGeminiCache() {
-            HostedTranslationService.shared.geminiCataloguedTranslationInputs = []
+            Task { @MainActor in
+                HostedTranslationService.shared.geminiCataloguedTranslationInputs = []
+            }
         }
 
         private static func clearStorageCache() {

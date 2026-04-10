@@ -11,7 +11,7 @@ import Foundation
 /* 3rd-party */
 import FirebaseStorage
 
-public struct DirectoryListing {
+public struct DirectoryListing: Sendable {
     // MARK: - Properties
 
     public let filePaths: Set<String>

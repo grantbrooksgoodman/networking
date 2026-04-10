@@ -14,9 +14,9 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
-import FirebaseStorage
+@preconcurrency import FirebaseStorage
 
-final class CoreStorage {
+final class CoreStorage: @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.fileManager) private var fileManager: FileManager
@@ -57,161 +57,108 @@ final class CoreStorage {
         }
 
         Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
 
-        var didComplete = false
-        var canComplete: Bool {
-            guard !didComplete else { return false }
-            didComplete = true
-            Networking.config.activityIndicatorDelegate.hide()
-            return true
-        }
-
+        let completion = OperationCompletion(completion)
         let timeout = Timeout(after: duration) {
-            guard canComplete else { return }
             completion(.failure(
                 .timedOut(metadata: .init(sender: self))
             ))
         }
 
-        switch operation {
-        case let .deleteAllItems(
-            atPath: path,
-            includeItemsInSubdirectories: includeItemsInSubdirectories
-        ):
-            Task {
-                let deleteAllItemsResult = await deleteAllItems(
+        Task {
+            let result: Callback<Any?, Exception>
+
+            switch operation {
+            case let .deleteAllItems(
+                atPath: path,
+                includeItemsInSubdirectories: includeItemsInSubdirectories
+            ):
+                result = await deleteAllItems(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     includeItemsInSubdirectories: includeItemsInSubdirectories
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(deleteAllItemsResult)
-            }
+            case let .deleteItem(
+                atPath: path
+            ):
+                result = await deleteItem(at: prependingEnvironment ? path.prependingCurrentEnvironment : path)
 
-        case let .deleteItem(
-            atPath: path
-        ):
-            Task {
-                let deleteItemResult = await deleteItem(at: prependingEnvironment ? path.prependingCurrentEnvironment : path)
-
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(deleteItemResult)
-            }
-
-        case let .downloadAllItems(
-            atPath: path,
-            toDirectory: localDirectory,
-            includeItemsInSubdirectories: includeItemsInSubdirectories,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let downloadAllItemsResult = await downloadAllItems(
+            case let .downloadAllItems(
+                atPath: path,
+                toDirectory: localDirectory,
+                includeItemsInSubdirectories: includeItemsInSubdirectories,
+                cacheStrategy: cacheStrategy
+            ):
+                result = await downloadAllItems(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     toDirectory: localDirectory,
                     includeItemsInSubdirectories: includeItemsInSubdirectories,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(downloadAllItemsResult)
-            }
-
-        case let .downloadItem(
-            atPath: path,
-            toLocalPath: localPath,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let downloadItemResult = await downloadItem(
+            case let .downloadItem(
+                atPath: path,
+                toLocalPath: localPath,
+                cacheStrategy: cacheStrategy
+            ):
+                result = await downloadItem(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     to: localPath,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(downloadItemResult)
-            }
-
-        case let .enumerateEmptyDirectories(
-            startingAt: path
-        ):
-            Task {
-                let enumerateEmptyDirectoriesResult = await enumerateEmptyDirectories(
+            case let .enumerateEmptyDirectories(
+                startingAt: path
+            ):
+                result = await enumerateEmptyDirectories(
                     startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(enumerateEmptyDirectoriesResult)
-            }
-
-        case let .getDirectoryListing(
-            atPath: path,
-            firstResultOnly: firstResultOnly
-        ):
-            Task {
+            case let .getDirectoryListing(
+                atPath: path,
+                firstResultOnly: firstResultOnly
+            ):
                 let getDirectoryListingResult = await getDirectoryListing(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     firstResultOnly: firstResultOnly
                 )
-
-                timeout.cancel()
-                guard canComplete else { return }
                 switch getDirectoryListingResult {
-                case let .success(directoryListing): completion(.success(directoryListing))
-                case let .failure(exception): completion(.failure(exception))
+                case let .success(directoryListing): result = .success(directoryListing)
+                case let .failure(exception): result = .failure(exception)
                 }
-            }
 
-        case let .itemExists(
-            asItemType: itemType,
-            atPath: path,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let itemExistsResult = await itemExists(
+            case let .itemExists(
+                asItemType: itemType,
+                atPath: path,
+                cacheStrategy: cacheStrategy
+            ):
+                result = await itemExists(
                     as: itemType,
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(itemExistsResult)
-            }
-
-        case let .sizeInKilobytes(
-            ofItemAtPath: path
-        ):
-            Task {
-                let sizeInKilobytesResult = await sizeInKilobytes(
+            case let .sizeInKilobytes(
+                ofItemAtPath: path
+            ):
+                result = await sizeInKilobytes(
                     ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(sizeInKilobytesResult)
-            }
-
-        case let .upload(
-            data,
-            metadata: metadata
-        ):
-            Task {
-                let uploadResult = await upload(
+            case let .upload(
+                data,
+                metadata: metadata
+            ):
+                result = await upload(
                     data,
                     metadata: metadata,
                     prependingEnvironment: prependingEnvironment
                 )
-
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(uploadResult)
             }
+
+            timeout.cancel()
+            completion(result)
         }
     }
 

@@ -21,7 +21,7 @@ public enum Networking {
 
     public static let config = Config.shared
 
-    private(set) static var didInitialize = false
+    private(set) nonisolated(unsafe) static var didInitialize = false
 
     /* MARK: Initialize */
 
@@ -41,7 +41,7 @@ public enum Networking {
 // MARK: - Config
 
 public extension Networking {
-    final class Config {
+    final class Config: @unchecked Sendable {
         /* MARK: Properties */
 
         fileprivate static let shared = Config()
@@ -55,7 +55,7 @@ public extension Networking {
         package var authDelegate: AuthDelegate = Auth()
         package var databaseDelegate: DatabaseDelegate = Database()
         package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate?
-        package var hostedTranslationDelegate: HostedTranslationDelegate = HostedTranslationService.shared
+        package nonisolated(unsafe) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
         package var storageDelegate: StorageDelegate = Storage()
 
         /* MARK: Computed Properties */

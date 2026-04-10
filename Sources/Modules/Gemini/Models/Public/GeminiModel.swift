@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-public enum GeminiModel: String {
+public enum GeminiModel: String, Sendable {
     case flash20 = "gemini-2.0-flash"
     case flash25 = "gemini-2.5-flash"
 }

@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-public enum CacheStrategy {
+public enum CacheStrategy: Sendable {
     case disregardCache
     case returnCacheFirst
     case returnCacheOnFailure

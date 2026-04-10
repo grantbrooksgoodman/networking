@@ -12,7 +12,7 @@ import Foundation
 import AppSubsystem
 import Translator
 
-final class HostedTranslationArchiver {
+final class HostedTranslationArchiver: @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.build) private var build: Build

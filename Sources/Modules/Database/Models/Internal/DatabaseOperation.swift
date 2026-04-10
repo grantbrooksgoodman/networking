@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-enum DatabaseOperation {
+enum DatabaseOperation: @unchecked Sendable {
     case getValues(
         atPath: String,
         cacheStrategy: CacheStrategy

@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-public struct EnhancementConfiguration {
+public struct EnhancementConfiguration: Sendable {
     // MARK: - Properties
 
     let additionalContext: String?

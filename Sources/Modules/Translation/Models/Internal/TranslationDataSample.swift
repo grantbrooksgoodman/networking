@@ -11,7 +11,7 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-struct TranslationDataSample: Equatable {
+struct TranslationDataSample: Equatable, @unchecked Sendable {
     // MARK: - Properties
 
     static let empty: TranslationDataSample = .init(

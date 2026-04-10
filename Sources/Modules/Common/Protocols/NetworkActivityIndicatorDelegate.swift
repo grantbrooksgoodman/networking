@@ -16,7 +16,10 @@ import AppSubsystem
 public protocol NetworkActivityIndicatorDelegate {
     // MARK: - Properties
 
+    @MainActor
     var backgroundColor: Color { get }
+
+    @MainActor
     var progressViewTintColor: Color { get }
 
     // MARK: - Methods
@@ -28,10 +31,12 @@ public protocol NetworkActivityIndicatorDelegate {
 public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorDelegate {
     // MARK: - Properties
 
+    @MainActor
     public let progressViewTintColor: Color = .white
 
     // MARK: - Computed Properties
 
+    @MainActor
     public var backgroundColor: Color { .accent }
 
     // MARK: - Init
@@ -41,10 +46,14 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
     // MARK: - Methods
 
     public func show() {
-        Observables.isNetworkActivityOccurring.value = true
+        Task { @MainActor in
+            Observables.isNetworkActivityOccurring.value = true
+        }
     }
 
     public func hide() {
-        Observables.isNetworkActivityOccurring.value = false
+        Task { @MainActor in
+            Observables.isNetworkActivityOccurring.value = false
+        }
     }
 }

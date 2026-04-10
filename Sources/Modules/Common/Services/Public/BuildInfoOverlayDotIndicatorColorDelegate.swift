@@ -13,7 +13,7 @@ import SwiftUI
 import AppSubsystem
 
 public extension Networking { // swiftlint:disable:next type_name
-    struct BuildInfoOverlayDotIndicatorColorDelegate: AppSubsystem.Delegates.BuildInfoOverlayDotIndicatorColorDelegate {
+    struct BuildInfoOverlayDotIndicatorColorDelegate: AppSubsystem.Delegates.BuildInfoOverlayDotIndicatorColorDelegate, Sendable {
         public static let shared = BuildInfoOverlayDotIndicatorColorDelegate()
         public var developerModeIndicatorDotColor: Color {
             switch Networking.config.environment {
