@@ -45,7 +45,6 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Perform Operation
 
-    // swiftlint:disable:next function_body_length
     func performOperation(
         _ operation: StorageOperation,
         prependingEnvironment: Bool,
@@ -63,9 +62,6 @@ final class CoreStorage: @unchecked Sendable {
                 .internetConnectionOffline(metadata: .init(sender: self))
             ))
         }
-
-        Networking.config.activityIndicatorDelegate.show()
-        defer { Networking.config.activityIndicatorDelegate.hide() }
 
         let completion = OperationCompletion(completion)
         let timeout = Timeout(after: duration) {
@@ -276,12 +272,18 @@ final class CoreStorage: @unchecked Sendable {
 
         switch getDirectoryListingResult {
         case let .success(directoryListing):
-            for filePath in directoryListing.filePaths {
-                let deleteItemResult = await deleteItem(at: filePath)
+            await withTaskGroup(of: Exception?.self) { taskGroup in
+                for filePath in directoryListing.filePaths {
+                    taskGroup.addTask {
+                        switch await self.deleteItem(at: filePath) {
+                        case let .failure(exception): return exception
+                        case .success: return nil
+                        }
+                    }
+                }
 
-                switch deleteItemResult {
-                case let .failure(exception): exceptions.append(exception)
-                default: continue
+                for await exception in taskGroup {
+                    if let exception { exceptions.append(exception) }
                 }
             }
 
@@ -396,25 +398,32 @@ final class CoreStorage: @unchecked Sendable {
 
         switch getDirectoryListingResult {
         case let .success(directoryListing):
-            for filePath in directoryListing.filePaths {
-                guard let fileName = filePath.fileName else {
-                    exceptions.append(.init(
-                        "Failed to resolve file name.",
-                        userInfo: ["FilePath": filePath],
-                        metadata: .init(sender: self)
-                    ))
-                    continue
+            await withTaskGroup(of: Exception?.self) { taskGroup in
+                for filePath in directoryListing.filePaths {
+                    guard let fileName = filePath.fileName else {
+                        exceptions.append(.init(
+                            "Failed to resolve file name.",
+                            userInfo: ["FilePath": filePath],
+                            metadata: .init(sender: self)
+                        ))
+                        continue
+                    }
+
+                    let destination = localDirectory.appending(path: "/\(path)/\(fileName)")
+                    taskGroup.addTask {
+                        switch await self.downloadItem(
+                            at: filePath,
+                            to: destination,
+                            cacheStrategy: cacheStrategy
+                        ) {
+                        case let .failure(exception): return exception
+                        case .success: return nil
+                        }
+                    }
                 }
 
-                let downloadItemResult = await downloadItem(
-                    at: filePath,
-                    to: localDirectory.appending(path: "/\(path)/\(fileName)"),
-                    cacheStrategy: cacheStrategy
-                )
-
-                switch downloadItemResult {
-                case let .failure(exception): exceptions.append(exception)
-                default: continue
+                for await exception in taskGroup {
+                    if let exception { exceptions.append(exception) }
                 }
             }
 

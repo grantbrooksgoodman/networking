@@ -46,19 +46,24 @@ public extension Networking {
 
         fileprivate static let shared = Config()
 
-        /// Determines verbosity level for AI-enhanced translation status messages.
-        public private(set) var enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?
         /// When `true`, enables system dialog translations to be enhanced with artificial intelligence.
-        public private(set) var isEnhancedDialogTranslationEnabled = false
+        @LockIsolated public private(set) var isEnhancedDialogTranslationEnabled = false
 
-        package var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
-        package var authDelegate: AuthDelegate = Auth()
-        package var databaseDelegate: DatabaseDelegate = Database()
-        package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate?
-        package nonisolated(unsafe) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
-        package var storageDelegate: StorageDelegate = Storage()
+        @LockIsolated package private(set) var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
+        @LockIsolated package private(set) var authDelegate: AuthDelegate = Auth()
+        @LockIsolated package private(set) var databaseDelegate: DatabaseDelegate = Database()
+        @LockIsolated package private(set) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
+        @LockIsolated package private(set) var storageDelegate: StorageDelegate = Storage()
+
+        private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(wrappedValue: nil)
+        private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(wrappedValue: nil)
 
         /* MARK: Computed Properties */
+
+        /// Determines verbosity level for AI-enhanced translation status messages.
+        public var enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity? {
+            _enhancedTranslationStatusVerbosity.wrappedValue
+        }
 
         public var environment: NetworkEnvironment {
             @Persistent(.networkEnvironment) var persistedValue: NetworkEnvironment?
@@ -68,6 +73,10 @@ public extension Networking {
             }
 
             return persistedValue
+        }
+
+        package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate? {
+            _geminiAPIKeyDelegate.wrappedValue
         }
 
         /* MARK: Init */
@@ -88,7 +97,7 @@ public extension Networking {
         /* MARK: Enhanced Translation Configuraiton */
 
         public func setEnhancedTranslationStatusVerbosity(_ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?) {
-            self.enhancedTranslationStatusVerbosity = enhancedTranslationStatusVerbosity
+            _enhancedTranslationStatusVerbosity.wrappedValue = enhancedTranslationStatusVerbosity
         }
 
         public func setIsEnhancedDialogTranslationEnabled(_ isEnhancedDialogTranslationEnabled: Bool) {
@@ -121,7 +130,7 @@ public extension Networking {
             if let activityIndicatorDelegate { self.activityIndicatorDelegate = activityIndicatorDelegate }
             if let authDelegate { self.authDelegate = authDelegate }
             if let databaseDelegate { self.databaseDelegate = databaseDelegate }
-            if let geminiAPIKeyDelegate { self.geminiAPIKeyDelegate = geminiAPIKeyDelegate }
+            if let geminiAPIKeyDelegate { _geminiAPIKeyDelegate.wrappedValue = geminiAPIKeyDelegate }
             if let hostedTranslationDelegate { self.hostedTranslationDelegate = hostedTranslationDelegate }
             if let storageDelegate { self.storageDelegate = storageDelegate }
 

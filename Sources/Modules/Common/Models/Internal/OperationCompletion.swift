@@ -15,25 +15,29 @@ final class OperationCompletion: @unchecked Sendable {
     // MARK: - Properties
 
     private let body: (Callback<Any?, Exception>) -> Void
-    private let didComplete = LockIsolated<Bool>(wrappedValue: false)
+
+    @LockIsolated private var didComplete = false
 
     // MARK: - Init
 
-    init(_ body: @escaping (Callback<Any?, Exception>) -> Void) {
+    init(
+        _ body: @escaping (Callback<Any?, Exception>) -> Void
+    ) {
         self.body = body
+        Networking.config.activityIndicatorDelegate.show()
     }
 
     // MARK: - Call as Function
 
     func callAsFunction(_ result: Callback<Any?, Exception>) {
-        let shouldProceed: Bool = didComplete.projectedValue.withValue {
+        let shouldProceed = $didComplete.withValue {
             guard !$0 else { return false }
             $0 = true
             return true
         }
 
-        guard shouldProceed else { return } // TODO: Audit the commented line.
-//        Networking.config.activityIndicatorDelegate.hide()
+        guard shouldProceed else { return }
+        Networking.config.activityIndicatorDelegate.hide()
         body(result)
     }
 }

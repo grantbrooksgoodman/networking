@@ -11,10 +11,10 @@ import Foundation
 /* Proprietary */
 import Translator
 
-public struct TranslationReference: Codable, Equatable {
+public struct TranslationReference: Codable, Equatable, Sendable {
     // MARK: - Types
 
-    public enum `Type`: Codable, Equatable {
+    public enum `Type`: Codable, Equatable, Sendable {
         /* MARK: Cases */
 
         case archived(_ hash: String, value: String? = nil)

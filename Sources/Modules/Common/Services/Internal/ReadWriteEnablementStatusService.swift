@@ -33,7 +33,6 @@ final class ReadWriteEnablementStatusService {
             .forcedUpdateRequiredPublisher
             .filter { $0 }
             .prefix(1)
-            .receive(on: DispatchQueue.main)
             .sink { _ in
                 Networking.isReadWriteEnabled = false
             }

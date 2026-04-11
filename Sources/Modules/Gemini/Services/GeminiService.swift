@@ -12,6 +12,7 @@ import Foundation
 import AppSubsystem
 import Translator
 
+// swiftlint:disable:next type_body_length
 final actor GeminiService {
     // MARK: - Types
 

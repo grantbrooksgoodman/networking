@@ -33,7 +33,9 @@ public enum CoreDatabaseStore {
     }
 
     public static func clearStore() {
-        storedDataSamples.wrappedValue = [:]
+        storedDataSamples.projectedValue.withValue {
+            $0 = [:]
+        }
     }
 
     public static func filter(
@@ -78,7 +80,7 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private var _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
 
     // MARK: - Computed Properties
 
@@ -168,9 +170,6 @@ final class CoreDatabase: @unchecked Sendable {
                 .internetConnectionOffline(metadata: .init(sender: self))
             ))
         }
-
-        Networking.config.activityIndicatorDelegate.show()
-        defer { Networking.config.activityIndicatorDelegate.hide() }
 
         let completion = OperationCompletion(completion)
         let timeout = Timeout(after: duration) {
@@ -273,11 +272,13 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func _getValues(at path: String) async -> Callback<Any, Exception> {
         await withCheckedContinuation { continuation in
-            var didResume = false
+            @LockIsolated var didResume = false
             var canResume: Bool {
-                guard !didResume else { return false }
-                didResume = true
-                return true
+                $didResume.withValue {
+                    guard !$0 else { return false }
+                    $0 = true
+                    return true
+                }
             }
 
             firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in

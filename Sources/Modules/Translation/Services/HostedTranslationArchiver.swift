@@ -12,6 +12,7 @@ import Foundation
 import AppSubsystem
 import Translator
 
+// swiftlint:disable:next type_body_length
 final class HostedTranslationArchiver: @unchecked Sendable {
     // MARK: - Dependencies
 
@@ -48,7 +49,9 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     // MARK: - Add to Hosted Archive
 
-    func addToHostedArchive(_ translation: Translation) async -> Exception? {
+    nonisolated(nonsending) func addToHostedArchive(
+        _ translation: Translation
+    ) async -> Exception? {
         if let exception = TranslationValidator.validate(
             translation: translation,
             metadata: .init(sender: self)
@@ -86,7 +89,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     // MARK: - Find Archived Translations
 
-    func findArchivedTranslation(
+    nonisolated(nonsending) func findArchivedTranslation(
         input: TranslationInput,
         languagePair: LanguagePair
     ) async -> Callback<Translation, Exception> {
@@ -111,7 +114,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         }
     }
 
-    func findArchivedTranslation(
+    nonisolated(nonsending) func findArchivedTranslation(
         id inputValueEncodedHash: String,
         languagePair: LanguagePair
     ) async -> Callback<Translation, Exception> {
@@ -188,7 +191,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     // MARK: - Remove Archived Translations
 
-    func removeArchivedTranslation(
+    nonisolated(nonsending) func removeArchivedTranslation(
         for input: TranslationInput,
         languagePair: LanguagePair
     ) async -> Exception? {
@@ -208,7 +211,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     // MARK: - Auxiliary
 
-    private func deriveTranslation(
+    private nonisolated(nonsending) func deriveTranslation(
         input originalInput: TranslationInput?,
         inputValueEncodedHash originalInputHash: String,
         languagePair originalLanguagePair: LanguagePair
@@ -261,7 +264,9 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         ))
     }
 
-    private func populateTranslationDataSnapshot(expiryThreshold: Duration) async -> Exception? {
+    private nonisolated(nonsending) func populateTranslationDataSnapshot(
+        expiryThreshold: Duration
+    ) async -> Exception? {
         let shouldProceed = $state.withValue { state in
             guard !state.isPopulating,
                   state.translationDataSample.isExpired ||

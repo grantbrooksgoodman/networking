@@ -14,7 +14,7 @@ import AppSubsystem
 import Translator
 
 // swiftlint:disable:next class_delegate_protocol
-public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate {
+public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendable {
     func findArchivedTranslation(
         id inputValueEncodedHash: String,
         languagePair: LanguagePair

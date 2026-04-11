@@ -12,7 +12,7 @@ import Foundation
 import AppSubsystem
 
 // swiftlint:disable:next class_delegate_protocol
-public protocol StorageDelegate {
+public protocol StorageDelegate: Sendable {
     func clearStore()
 
     func deleteAllItems(

@@ -15,13 +15,18 @@ import AlertKit
 import AppSubsystem
 import Translator
 
-final class HostedTranslationService: HostedTranslationDelegate {
+final class HostedTranslationService: HostedTranslationDelegate, @unchecked Sendable {
     // MARK: - Types
 
     private enum ArchiveTreatment {
         case addToBothArchives
         case addToHostedArchive
         case addToLocalArchive
+    }
+
+    private enum PreprocessingResult: Sendable {
+        case archiveHit(Translation)
+        case archiveMiss
     }
 
     // MARK: - Dependencies
@@ -51,7 +56,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
         return """
         You are translating text as part of standard, user-facing system dialogs\(dynamicContextSuffix)
         Be sure to use an appropriate, respectful, and neutral tone.
-        Ensure consistency in pronoun usage and grammatical correctness. 
+        Ensure consistency in pronoun usage and grammatical correctness.
         Use infinitive forms for user actions where it makes sense (e.g., use 'cerrar' in place of 'cierra' for Spanish).
         """
     }
@@ -112,6 +117,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
 
     // MARK: - Translation
 
+    // swiftlint:disable:next function_body_length
     func getTranslations(
         for inputs: [TranslationInput],
         languagePair: LanguagePair,
@@ -128,38 +134,67 @@ final class HostedTranslationService: HostedTranslationDelegate {
             count: inputs.count
         )
 
-        for (index, input) in inputs.enumerated() {
-            if let prevalidateInputResult = await prevalidateInput(
-                input,
-                languagePair: languagePair
-            ) {
-                switch prevalidateInputResult {
-                case let .success(translation):
-                    resolvedTranslations[index] = translation
-                    continue
+        var preprocessingException: Exception?
 
-                case let .failure(exception):
-                    return .failure(exception)
+        await withTaskGroup(of: (Int, Callback<PreprocessingResult, Exception>).self) { taskGroup in
+            for (index, input) in inputs.enumerated() {
+                taskGroup.addTask {
+                    if let prevalidateInputResult = await self.prevalidateInput(
+                        input,
+                        languagePair: languagePair
+                    ) {
+                        switch prevalidateInputResult {
+                        case let .success(translation):
+                            return (index, .success(.archiveHit(translation)))
+
+                        case let .failure(exception):
+                            return (index, .failure(exception))
+                        }
+                    }
+
+                    if let checkHostedArchiveResult = await self.checkHostedArchive(
+                        for: input,
+                        languagePair: languagePair,
+                        enhancementConfig: enhancementConfig
+                    ) {
+                        switch checkHostedArchiveResult {
+                        case let .success(translation):
+                            return (index, .success(.archiveHit(translation)))
+
+                        case let .failure(exception):
+                            return (index, .failure(exception))
+                        }
+                    }
+
+                    return (index, .success(.archiveMiss))
                 }
             }
 
-            if let checkHostedArchiveResult = await checkHostedArchive(
-                for: input,
-                languagePair: languagePair,
-                enhancementConfig: enhancementConfig
-            ) {
-                switch checkHostedArchiveResult {
-                case let .success(translation):
-                    resolvedTranslations[index] = translation
-                    continue
+            for await(index, result) in taskGroup {
+                guard preprocessingException == nil else { continue }
+
+                switch result {
+                case let .success(preprocessingResult):
+                    switch preprocessingResult {
+                    case let .archiveHit(translation):
+                        resolvedTranslations[index] = translation
+
+                    case .archiveMiss:
+                        archiveMisses.append((
+                            index,
+                            inputs[index]
+                        ))
+                    }
 
                 case let .failure(exception):
-                    return .failure(exception)
+                    preprocessingException = exception
+                    taskGroup.cancelAll()
                 }
             }
+        }
 
-            // This input needs translation.
-            archiveMisses.append((index, input))
+        if let preprocessingException {
+            return .failure(preprocessingException)
         }
 
         if archiveMisses.isEmpty {
@@ -214,6 +249,7 @@ final class HostedTranslationService: HostedTranslationDelegate {
                             languagePair: processedTranslation.languagePair
                         )
 
+                    // swiftlint:disable:next identifier_name
                     case let .failure(_exception):
                         exception = _exception
                         taskGroup.cancelAll()
