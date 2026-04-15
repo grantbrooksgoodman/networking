@@ -25,20 +25,20 @@ public struct TranslationReference: Codable, Equatable, Sendable {
         public var key: String {
             switch self {
             case let .archived(hash, value: _):
-                return hash
+                hash
 
             case let .idempotent(encodedValue):
-                return encodedValue
+                encodedValue
             }
         }
 
         public var value: String? {
             switch self {
             case let .archived(_, value: value):
-                return value
+                value
 
             case .idempotent:
-                return nil
+                nil
             }
         }
     }
