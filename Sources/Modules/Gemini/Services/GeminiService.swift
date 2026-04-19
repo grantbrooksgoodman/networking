@@ -12,7 +12,8 @@ import Foundation
 import AppSubsystem
 import Translator
 
-final class GeminiService {
+// swiftlint:disable:next type_body_length
+final actor GeminiService {
     // MARK: - Types
 
     private struct CacheKey: Hashable {
@@ -30,7 +31,7 @@ final class GeminiService {
 
     static let shared = GeminiService()
 
-    @LockIsolated private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
+    private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
 
     // MARK: - Init
 
@@ -247,8 +248,7 @@ final class GeminiService {
             translation: translation
         )
 
-        let cachedValue: Exception?? = $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] }
-        if let cachedValue {
+        if let cachedValue = cachedEnhancedOutputValidationResults[cacheKey] {
             return cachedValue
         }
 
@@ -344,7 +344,7 @@ final class GeminiService {
             )
         }
 
-        $cachedEnhancedOutputValidationResults.withValue { $0[cacheKey] = exception }
+        cachedEnhancedOutputValidationResults[cacheKey] = exception
         return exception
     }
 }

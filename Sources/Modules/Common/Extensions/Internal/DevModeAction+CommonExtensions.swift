@@ -14,6 +14,7 @@ import AppSubsystem
 
 extension DevModeAction {
     static var switchEnvironmentAction: DevModeAction {
+        @Sendable
         func switchEnvironment() {
             Task {
                 @Sendable
@@ -82,6 +83,7 @@ extension DevModeAction {
     }
 
     static var toggleNetworkActivityIndicatorAction: DevModeAction {
+        @Sendable
         func toggleNetworkActivityIndicator() {
             @Dependency(\.coreKit.hud) var coreHUD: CoreKit.HUD
             @Persistent(.isNetworkActivityIndicatorEnabled) var persistedValue: Bool?

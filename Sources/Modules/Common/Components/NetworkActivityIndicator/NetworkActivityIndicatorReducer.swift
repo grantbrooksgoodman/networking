@@ -44,10 +44,12 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
         /* MARK: Computed Properties */
 
+        @MainActor
         var backgroundColor: Color {
             Networking.config.activityIndicatorDelegate.backgroundColor
         }
 
+        @MainActor
         var progressViewTintColor: Color {
             Networking.config.activityIndicatorDelegate.progressViewTintColor
         }

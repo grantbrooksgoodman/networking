@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-enum StorageOperation {
+enum StorageOperation: Sendable {
     case deleteAllItems(
         atPath: String,
         includeItemsInSubdirectories: Bool

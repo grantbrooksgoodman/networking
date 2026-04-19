@@ -16,55 +16,108 @@ import AppSubsystem
 /* 3rd-party */
 import FirebaseDatabase
 
+/// An in-memory cache for database query results.
+///
+/// `CoreDatabaseStore` stores ``DataSample`` instances
+/// keyed by their database path. Expired samples are
+/// automatically discarded on retrieval.
+///
+/// The database implementation uses this store internally
+/// to support ``CacheStrategy`` behavior. You can also
+/// interact with the store directly to manage cached
+/// data:
+///
+/// ```swift
+/// // Remove a specific cached value.
+/// CoreDatabaseStore.removeValue(forKey: "users/123")
+///
+/// // Clear all cached data.
+/// CoreDatabaseStore.clearStore()
+/// ```
 public enum CoreDatabaseStore {
     // MARK: - Properties
 
-    @LockIsolated private static var storedDataSamples = [String: DataSample]()
+    private static let storedDataSamples = LockIsolated<[String: DataSample]>(wrappedValue: [:])
 
     // MARK: - Methods
 
+    /// Stores a data sample in the cache for the
+    /// specified key.
+    ///
+    /// - Parameters:
+    ///   - value: The data sample to store.
+    ///   - key: The cache key, typically a database path.
     public static func addValue(
         _ value: DataSample,
         forKey key: String
     ) {
-        $storedDataSamples[key] = value
+        storedDataSamples.projectedValue.withValue {
+            $0[key] = value
+        }
     }
 
+    /// Removes all cached data samples from the store.
     public static func clearStore() {
-        storedDataSamples = [:]
+        storedDataSamples.projectedValue.withValue {
+            $0 = [:]
+        }
     }
 
+    /// Removes all data samples that do not satisfy the
+    /// given predicate.
+    ///
+    /// - Parameter isIncluded: A closure that takes a
+    ///   key-value pair and returns `true` if the pair
+    ///   should remain in the store.
     public static func filter(
         _ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool
     ) {
-        $storedDataSamples.withValue {
+        storedDataSamples.projectedValue.withValue {
             $0 = $0.filter { isIncluded($0) }
         }
     }
 
+    /// Returns the cached data for the specified key, or
+    /// `nil` if no unexpired sample exists.
+    ///
+    /// If the stored sample has expired, it is
+    /// automatically removed from the store.
+    ///
+    /// - Parameter key: The cache key to look up.
+    ///
+    /// - Returns: The cached data, or `nil` if no valid
+    ///   sample exists.
     public static func getValue(forKey key: String) -> Any? {
-        guard let storedDataSample = $storedDataSamples[key],
-              !storedDataSample.isExpired,
-              !(storedDataSample.data is NSNull) else {
-            $storedDataSamples[key] = nil
-            return nil
+        storedDataSamples.projectedValue.withValue {
+            guard let storedDataSample = $0[key],
+                  !storedDataSample.isExpired,
+                  !(storedDataSample.data is NSNull) else {
+                $0[key] = nil
+                return nil
+            }
+
+            Logger.log(
+                "Returning stored value for data at path \"\(key)\".",
+                domain: .caches,
+                sender: self
+            )
+
+            return storedDataSample.data
         }
-
-        Logger.log(
-            "Returning stored value for data at path \"\(key)\".",
-            domain: .caches,
-            sender: self
-        )
-
-        return storedDataSample.data
     }
 
+    /// Removes the cached data sample for the specified
+    /// key.
+    ///
+    /// - Parameter key: The cache key to remove.
     public static func removeValue(forKey key: String) {
-        $storedDataSamples[key] = nil
+        storedDataSamples.projectedValue.withValue {
+            $0[key] = nil
+        }
     }
 }
 
-final class CoreDatabase {
+final class CoreDatabase: @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.firebaseDatabase) private var firebaseDatabase: DatabaseReference
@@ -72,7 +125,14 @@ final class CoreDatabase {
 
     // MARK: - Properties
 
-    private var globalCacheStrategy: CacheStrategy?
+    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+
+    // MARK: - Computed Properties
+
+    private var globalCacheStrategy: CacheStrategy? {
+        get { _globalCacheStrategy.wrappedValue }
+        set { _globalCacheStrategy.projectedValue.withValue { $0 = newValue } }
+    }
 
     // MARK: - ID Key Generation
 
@@ -156,85 +216,56 @@ final class CoreDatabase {
             ))
         }
 
-        Networking.config.activityIndicatorDelegate.show()
-
-        var didComplete = false
-        var canComplete: Bool {
-            guard !didComplete else { return false }
-            didComplete = true
-            Networking.config.activityIndicatorDelegate.hide()
-            return true
-        }
-
+        let completion = OperationCompletion(completion)
         let timeout = Timeout(after: duration) {
-            guard canComplete else { return }
             completion(.failure(
                 .timedOut(metadata: .init(sender: self))
             ))
         }
 
-        switch operation {
-        case let .getValues(
-            atPath: path,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let getValuesResult = await getValues(
+        Task {
+            let result: Callback<Any?, Exception> = switch operation {
+            case let .getValues(
+                atPath: path,
+                cacheStrategy: cacheStrategy
+            ):
+                await getValues(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(getValuesResult)
-            }
-
-        case let .queryValues(
-            atPath: path,
-            strategy: strategy,
-            cacheStrategy: cacheStrategy
-        ):
-            Task {
-                let queryValuesResult = await queryValues(
+            case let .queryValues(
+                atPath: path,
+                strategy: strategy,
+                cacheStrategy: cacheStrategy
+            ):
+                await queryValues(
                     at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                     strategy: strategy,
                     cacheStrategy: globalCacheStrategy ?? cacheStrategy
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(queryValuesResult)
-            }
-
-        case let .setValue(
-            value,
-            forKey: key
-        ):
-            Task {
-                let setValueResult = await setValue(
+            case let .setValue(
+                value,
+                forKey: key
+            ):
+                await setValue(
                     value,
                     forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
                 )
 
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(setValueResult)
-            }
-
-        case let .updateChildValues(
-            forKey: key,
-            withData: data
-        ):
-            Task {
-                let updateChildValuesResult = await updateChildValues(
+            case let .updateChildValues(
+                forKey: key,
+                withData: data
+            ):
+                await updateChildValues(
                     forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
                     with: data
                 )
-
-                timeout.cancel()
-                guard canComplete else { return }
-                completion(updateChildValuesResult)
             }
+
+            timeout.cancel()
+            completion(result)
         }
     }
 
@@ -284,11 +315,13 @@ final class CoreDatabase {
 
     private func _getValues(at path: String) async -> Callback<Any, Exception> {
         await withCheckedContinuation { continuation in
-            var didResume = false
+            @LockIsolated var didResume = false
             var canResume: Bool {
-                guard !didResume else { return false }
-                didResume = true
-                return true
+                $didResume.withValue {
+                    guard !$0 else { return false }
+                    $0 = true
+                    return true
+                }
             }
 
             firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in
@@ -364,10 +397,9 @@ final class CoreDatabase {
         strategy: QueryStrategy
     ) async -> Callback<Any, Exception> {
         let reference = firebaseDatabase.child(path)
-        var query: DatabaseQuery!
-        switch strategy {
-        case let .first(limit): query = reference.queryLimited(toFirst: .init(limit))
-        case let .last(limit): query = reference.queryLimited(toLast: .init(limit))
+        let query: DatabaseQuery! = switch strategy {
+        case let .first(limit): reference.queryLimited(toFirst: .init(limit))
+        case let .last(limit): reference.queryLimited(toLast: .init(limit))
         }
 
         do {

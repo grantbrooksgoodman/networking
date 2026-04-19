@@ -11,12 +11,21 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
+/// A namespace for networking-specific cache domains.
+///
+/// These domains partition the networking module's cached
+/// data into discrete, independently clearable categories.
 public extension CacheDomain {
     enum Networking {
         // MARK: - Properties
 
+        /// The cache domain for database operations.
         public static let database: CacheDomain = .init("database") { clearDatabaseCache() }
+
+        /// The cache domain for Gemini API operations.
         public static let gemini: CacheDomain = .init("gemini") { clearGeminiCache() }
+
+        /// The cache domain for file storage operations.
         public static let storage: CacheDomain = .init("storage") { clearStorageCache() }
 
         // MARK: - Methods
@@ -26,7 +35,9 @@ public extension CacheDomain {
         }
 
         private static func clearGeminiCache() {
-            HostedTranslationService.shared.geminiCataloguedTranslationInputs = []
+            Task { @MainActor in
+                HostedTranslationService.shared.geminiCataloguedTranslationInputs = []
+            }
         }
 
         private static func clearStorageCache() {

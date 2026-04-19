@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.0
 
 /* Native */
 import PackageDescription
@@ -19,7 +19,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/grantbrooksgoodman/app-subsystem", branch: "main"),
+        .package(url: "https://github.com/grantbrooksgoodman/app-subsystem", branch: "swift-6"),
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", .upToNextMajor(from: "11.4.0")),
 //        .package(url: "https://github.com/nicklockwood/SwiftFormat", branch: "main"),
 //        .package(url: "https://github.com/realm/SwiftLint", branch: "main"),
@@ -34,6 +34,7 @@ let package = Package(
                 .product(name: "FirebaseStorage", package: "firebase-ios-sdk"),
             ],
             path: "Sources",
+            swiftSettings: [.swiftLanguageMode(.v6)],
             plugins: [ /* .plugin(name: "SwiftLintBuildToolPlugin", package: "SwiftLint") */ ]
         ),
     ]
