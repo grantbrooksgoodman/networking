@@ -11,10 +11,31 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
+/// A namespace for factory methods that create
+/// networking-specific exceptions.
+///
+/// Use the methods on `Exception.Networking` to create
+/// exceptions with descriptive context for common
+/// networking error conditions:
+///
+/// ```swift
+/// return .failure(
+///     .Networking.decodingFailed(
+///         data: rawData,
+///         .init(sender: self)
+///     )
+/// )
+/// ```
 public extension Exception {
     enum Networking {
         // MARK: - Public
 
+        /// Creates an exception indicating that decoding
+        /// the specified data failed.
+        ///
+        /// - Parameters:
+        ///   - data: The data that could not be decoded.
+        ///   - metadata: The exception metadata.
         public static func decodingFailed(
             data: Any,
             _ metadata: ExceptionMetadata
@@ -26,6 +47,13 @@ public extension Exception {
             )
         }
 
+        /// Creates an exception indicating that a
+        /// serialized value does not conform to a
+        /// supported Foundation type.
+        ///
+        /// - Parameters:
+        ///   - value: The unsupported value.
+        ///   - metadata: The exception metadata.
         public static func invalidType(
             value: Any,
             _ metadata: ExceptionMetadata
@@ -37,17 +65,29 @@ public extension Exception {
             )
         }
 
+        /// Creates an exception indicating that a type
+        /// value was not serialized before use.
+        ///
+        /// - Parameters:
+        ///   - data: The unserialized data.
+        ///   - metadata: The exception metadata.
         public static func notSerialized(
             data: [String: Any],
             _ metadata: ExceptionMetadata
         ) -> Exception {
-            return .init(
+            .init(
                 "Type value must be serialized.",
                 userInfo: ["Data": data],
                 metadata: metadata
             )
         }
 
+        /// Creates an exception indicating that the
+        /// specified serialization key is not updatable.
+        ///
+        /// - Parameters:
+        ///   - key: The key that was not updatable.
+        ///   - metadata: The exception metadata.
         public static func notUpdatable(
             key: Any,
             _ metadata: ExceptionMetadata
@@ -59,6 +99,15 @@ public extension Exception {
             )
         }
 
+        /// Creates an exception indicating that a
+        /// typecast operation failed.
+        ///
+        /// - Parameters:
+        ///   - typeName: The name of the target type.
+        ///     Pass `nil` for a generic failure message.
+        ///   - userInfo: A dictionary of supplementary
+        ///     information. The default is `nil`.
+        ///   - metadata: The exception metadata.
         public static func typecastFailed(
             _ typeName: String? = nil,
             userInfo: [String: Any]? = nil,
@@ -71,6 +120,12 @@ public extension Exception {
             )
         }
 
+        /// Creates an exception indicating a type mismatch
+        /// for the specified serialization key.
+        ///
+        /// - Parameters:
+        ///   - key: The key with the mismatched type.
+        ///   - metadata: The exception metadata.
         public static func typeMismatch(
             key: Any,
             _ metadata: ExceptionMetadata

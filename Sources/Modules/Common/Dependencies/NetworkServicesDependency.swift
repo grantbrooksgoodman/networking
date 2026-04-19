@@ -11,6 +11,8 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
+/// The dependency key for resolving the current
+/// ``NetworkServices`` instance.
 public enum NetworkServicesDependency: DependencyKey {
     public static func resolve(_: DependencyValues) -> NetworkServices {
         .init(
@@ -23,6 +25,12 @@ public enum NetworkServicesDependency: DependencyKey {
 }
 
 public extension DependencyValues {
+    /// The current networking services, accessible
+    /// through the dependency injection system.
+    ///
+    /// ```swift
+    /// @Dependency(\.networking) var networking: NetworkServices
+    /// ```
     var networking: NetworkServices {
         get { self[NetworkServicesDependency.self] }
         set { self[NetworkServicesDependency.self] = newValue }

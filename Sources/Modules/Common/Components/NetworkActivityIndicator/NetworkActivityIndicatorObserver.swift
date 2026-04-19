@@ -19,7 +19,6 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
 
     // MARK: - Properties
 
-    let id = UUID()
     let observedValues: [any ObservableProtocol] = [Observables.isNetworkActivityOccurring]
     let viewModel: ViewModel<NetworkActivityIndicatorReducer>
 

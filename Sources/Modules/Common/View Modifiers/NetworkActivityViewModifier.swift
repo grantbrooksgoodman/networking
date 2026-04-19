@@ -30,6 +30,16 @@ private struct NetworkActivityViewModifier: ViewModifier {
 }
 
 public extension View {
+    /// Overlays a network activity indicator on the view.
+    ///
+    /// Apply this modifier to your root view to display
+    /// an activity indicator whenever a networking
+    /// operation is in progress:
+    ///
+    /// ```swift
+    /// ContentView()
+    ///     .indicatesNetworkActivity()
+    /// ```
     func indicatesNetworkActivity() -> some View {
         modifier(NetworkActivityViewModifier())
     }
