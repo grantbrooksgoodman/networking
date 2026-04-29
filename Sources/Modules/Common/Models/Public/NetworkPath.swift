@@ -8,7 +8,7 @@
 /* Native */
 import Foundation
 
-/// A value that represents a path to a resource in the
+/// A value that represents a path to a resource on the
 /// network backend.
 ///
 /// Use `NetworkPath` to create a type-safe reference to a

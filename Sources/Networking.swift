@@ -96,7 +96,7 @@ public enum Networking {
     ///
     /// Call this method once at app launch. It
     /// configures the Firebase backend, registers
-    /// developer mode actions, and begins monitoring
+    /// Developer Mode actions, and begins monitoring
     /// read/write enablement status.
     ///
     /// - Important: This method must be called on the
@@ -185,7 +185,7 @@ public extension Networking {
         /// This value determines which backend
         /// environment the app communicates with. It
         /// persists across launches using
-        /// `UserDefaults`. The default is
+        /// persistent storage. The default is
         /// ``NetworkEnvironment/production``.
         ///
         /// To change the environment, call
@@ -216,7 +216,7 @@ public extension Networking {
 
         /// Sets the active network environment.
         ///
-        /// The new value is persisted to `UserDefaults`
+        /// The new value is persisted to storage
         /// and takes effect immediately for subsequent
         /// network operations. Database and storage
         /// paths that use environment-scoped prefixes

@@ -9,8 +9,6 @@ let package = Package(
     name: "Networking",
     platforms: [
         .iOS(.v17),
-        .tvOS(.v17),
-        .macOS(.v14),
     ],
     products: [
         .library(
@@ -19,7 +17,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/grantbrooksgoodman/app-subsystem", branch: "swift-6"),
+        .package(url: "https://github.com/grantbrooksgoodman/app-subsystem", branch: "main"),
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", .upToNextMajor(from: "11.4.0")),
 //        .package(url: "https://github.com/nicklockwood/SwiftFormat", branch: "main"),
 //        .package(url: "https://github.com/realm/SwiftLint", branch: "main"),

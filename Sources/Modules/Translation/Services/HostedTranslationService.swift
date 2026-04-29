@@ -170,7 +170,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 }
             }
 
-            for await(index, result) in taskGroup {
+            for await (index, result) in taskGroup {
                 guard preprocessingException == nil else { continue }
 
                 switch result {
@@ -232,7 +232,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 for (slot, translation) in zip(archiveMisses, translations) {
                     let slotIndex = slot.index
                     taskGroup.addTask {
-                        await(slotIndex, self.postProcess(
+                        await (slotIndex, self.postProcess(
                             translation,
                             enhancementConfig: enhancementConfig,
                             archiveTreatment: .addToBothArchives
@@ -240,7 +240,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     }
                 }
 
-                for await(index, postProcessResult) in taskGroup {
+                for await (index, postProcessResult) in taskGroup {
                     switch postProcessResult {
                     case let .success(processedTranslation):
                         resolvedTranslations[index] = Translation(
@@ -407,13 +407,6 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         }
     }
 
-    private func persistCataloguedInputs() {
-        @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
-        $geminiCataloguedTranslationInputs.withValue {
-            persistedArchive = $0.isEmpty ? nil : $0
-        }
-    }
-
     private func postProcess(
         _ translation: Translation,
         enhancementConfig: EnhancementConfiguration?,
@@ -432,8 +425,11 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 using: enhancementConfig
             )
 
-            $geminiCataloguedTranslationInputs.insert(translation.input.value)
-            persistCataloguedInputs()
+            @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
+            $geminiCataloguedTranslationInputs.withValue {
+                $0.insert(translation.input.value)
+                persistedArchive = $0.isEmpty ? nil : $0
+            }
 
             if let enhanceResult {
                 switch enhanceResult {

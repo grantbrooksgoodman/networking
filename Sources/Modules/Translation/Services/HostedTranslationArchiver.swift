@@ -34,16 +34,21 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     // MARK: - Init
 
     init() {
-        Task {
-            guard let exception = await populateTranslationDataSnapshot(expiryThreshold: .seconds(300)) else {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let exception = await self?.populateTranslationDataSnapshot(
+                expiryThreshold: .seconds(300)
+            ) else {
                 return Logger.log(
                     "Populated translation data snapshot.",
                     domain: .Networking.hostedTranslation,
-                    sender: self
+                    sender: self ?? HostedTranslationArchiver.self
                 )
             }
 
-            Logger.log(exception, domain: .Networking.hostedTranslation)
+            Logger.log(
+                exception,
+                domain: .Networking.hostedTranslation
+            )
         }
     }
 

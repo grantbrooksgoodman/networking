@@ -1,8 +1,8 @@
 # Networking
 
-A framework for integrating backend services into iOS apps through a unified, delegate-based interface.
+A framework for integrating backend services into iOS apps through a unified, delegate-based interface. 
 
-Networking provides authentication, database access, cloud storage, and hosted translation – backed by Firebase and configurable through protocol conformances. Default implementations are supplied for every service. Override only what your app requires.
+Networking extends the architecture provided by [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem), adding authentication, database access, cloud storage, and hosted translation – all backed by Firebase.
 
 ---
 
@@ -12,19 +12,27 @@ Networking provides authentication, database access, cloud storage, and hosted t
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Getting Started](#getting-started)
+  - [Understanding the Relationship to AppSubsystem](#understanding-the-relationship-to-appsubsystem)
+  - [Initialization](#initialization)
+  - [Accessing Services](#accessing-services)
+  - [Environment Management](#environment-management)
 - [Modules](#modules)
   - [Auth](#auth)
   - [Common](#common)
   - [Database](#database)
   - [Gemini](#gemini)
   - [Storage](#storage)
-  - [Translation](#translation)  
+  - [Translation](#translation)
 - [Delegate Customization](#delegate-customization)
 - [Dependencies](#dependencies)
 
 ---
 
 ## Overview
+
+Networking builds on the foundation provided by [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem). Where AppSubsystem establishes the core architecture your app is built on – dependency injection, persistence, state management, reactive observation, and developer tools – Networking uses that architecture to deliver a complete backend services layer for iOS apps.
+
+**Your app must initialize AppSubsystem before using Networking.** The two frameworks share a single dependency graph, a single persistence layer, and a single set of developer tools. Networking registers its services, cache domains, logger domains, and Developer Mode actions directly into the infrastructure that AppSubsystem provides. As a result, Networking is _not a standalone framework_ – it requires a fully configured AppSubsystem environment to function.
 
 Networking is organized around six modules, each focused on a specific backend service:
 
@@ -56,13 +64,33 @@ All modules are compiled into a single `Networking` library. There are no separa
 
 Networking is distributed as a Swift package. Add it to your project using [Swift Package Manager](https://docs.swift.org/swiftpm/documentation/packagemanagerdocs/).
 
+> **Note:** Because Networking depends on AppSubsystem, adding Networking to your package manifest automatically resolves AppSubsystem as a transitive dependency. However, your app target must still import and initialize AppSubsystem directly – Networking does not perform this step on your behalf.
+
 ---
 
 ## Getting Started
 
+### Understanding the Relationship to AppSubsystem
+
+Networking relies on AppSubsystem for its core infrastructure. The table below summarizes what Networking uses from AppSubsystem and how:
+
+| AppSubsystem Feature | How Networking Uses It |
+|---|---|
+| Dependency injection (`@Dependency`) | Exposes all networking services through the shared dependency graph. Your code accesses services using `@Dependency(\.networking)`. |
+| Persistence (`@Persistent`) | Persists the active network environment and indicator state across launches using strongly typed storage keys. |
+| Reactive observation (`Observable`) | Publishes network activity state for cross-feature observation. |
+| Logging (`Logger`, `LoggerDomain`) | Logs operations across database, storage, and translation modules using scoped logger domains. |
+| Caching (`CacheDomain`) | Registers networking-specific cache domains that integrate with the system-wide cache clearing provided by AppSubsystem. |
+| Developer tools (`DevModeService`) | Registers Developer Mode actions for switching environments and toggling the network activity indicator in pre-release builds. |
+| Build information (`Build`) | Reads the current build milestone to determine whether developer-only UI and actions are available. |
+| State management (`Reducer`) | Implements the network activity indicator using AppSubsystem's unidirectional data flow. |
+| Forced update monitoring | Observes AppSubsystem's forced-update publisher to disable network operations when an update is required. |
+
+Because of this deep integration, Networking **cannot** be used independently. Attempting to call `Networking.initialize()` without a prior call to `AppSubsystem.initialize(...)` results in undefined behavior. Attempting to access `Networking.config` before initialization results in a fatal error.
+
 ### Initialization
 
-Call `Networking.initialize()` once at app launch, after configuring AppSubsystem:
+Initialize AppSubsystem first, then call `Networking.initialize()`. Both calls must occur at app launch, before your app accesses any networking services:
 
 ```swift
 @main
@@ -79,11 +107,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 ```
 
-This single call configures the Firebase backend, registers developer mode actions for environment switching and activity indicator toggling, and begins monitoring read/write enablement status. It must be called before accessing `Networking.config`.
+`Networking.initialize()` performs three operations:
+
+1. Configures the Firebase backend by calling `FirebaseApp.configure()`.
+2. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching and network activity indicator toggling.
+3. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
+
+> **Important:** `Networking.initialize()` must be called on the main actor. The `Networking.config` property is not available until initialization completes.
 
 ### Accessing Services
 
-After initialization, use the `@Dependency` property wrapper to access networking services through [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift):
+After initialization, use the `@Dependency` property wrapper to access networking services through [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift). This property wrapper is provided by AppSubsystem's dependency injection system:
 
 ```swift
 @Dependency(\.networking) var networking: NetworkServices
@@ -97,13 +131,15 @@ Each property on [`NetworkServices`](Sources/Modules/Common/Models/Public/Networ
 
 ### Environment Management
 
-Networking supports three server environments – development, staging, and production – represented by the [`NetworkEnvironment`](Sources/Modules/Common/Models/Public/NetworkEnvironment.swift) enum. The active environment defaults to production and persists across launches:
+Networking supports three server environments – development, staging, and production – represented by the [`NetworkEnvironment`](Sources/Modules/Common/Models/Public/NetworkEnvironment.swift) enum. The active environment defaults to production and persists across launches using AppSubsystem's `@Persistent` property wrapper:
 
 ```swift
 Networking.config.setEnvironment(.development)
 ```
 
 Database and storage paths are automatically prefixed with the active environment by default, isolating data across environments without requiring changes to your path logic.
+
+In pre-release builds with Developer Mode enabled, the environment can also be switched at runtime through the Developer Mode action menu provided by AppSubsystem.
 
 ---
 
@@ -137,15 +173,6 @@ case let .failure(exception):
 
 The Common module provides shared infrastructure used across all other modules.
 
-#### Protocols
-
-| Protocol | Purpose |
-|---|---|
-| [`NetworkActivityIndicatorDelegate`](Sources/Modules/Common/Protocols/NetworkActivityIndicatorDelegate.swift) | Customizes the appearance and behavior of the network activity indicator overlay. |
-| [`Serializable`](Sources/Modules/Common/Protocols/SerializableProtocol.swift) | Defines a two-way encoding/decoding contract for types that are stored in the backend. |
-| [`Updatable`](Sources/Modules/Common/Protocols/UpdatableProtocol.swift) | Enables granular, key-based updates to individual properties of a remotely stored value. |
-| [`Validatable`](Sources/Modules/Common/Protocols/ValidatableProtocol.swift) | Declares an `isWellFormed` property for types that can verify their own structural integrity. |
-
 #### Models
 
 | Type | Purpose |
@@ -157,7 +184,16 @@ The Common module provides shared infrastructure used across all other modules.
 | [`NetworkPath`](Sources/Modules/Common/Models/Public/NetworkPath.swift) | A type-safe reference to a backend resource location. |
 | [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift) | An aggregate container providing access to all registered service delegates. |
 
-#### Network Activity Indicator
+#### Protocols
+
+| Protocol | Purpose |
+|---|---|
+| [`NetworkActivityIndicatorDelegate`](Sources/Modules/Common/Protocols/NetworkActivityIndicatorDelegate.swift) | Customizes the appearance and behavior of the network activity indicator overlay. |
+| [`Serializable`](Sources/Modules/Common/Protocols/SerializableProtocol.swift) | Defines a two-way encoding/decoding contract for types that are stored on the backend. |
+| [`Updatable`](Sources/Modules/Common/Protocols/UpdatableProtocol.swift) | Enables granular, key-based updates to individual properties of a remotely stored value. |
+| [`Validatable`](Sources/Modules/Common/Protocols/ValidatableProtocol.swift) | Declares an `isWellFormed` property for types that can verify their own structural integrity. |
+
+#### Network Activity View Modifier
 
 Apply the `indicatesNetworkActivity()` view modifier to any SwiftUI view to overlay a network activity indicator during long-running operations:
 
@@ -311,12 +347,16 @@ Networking.config.registerDatabaseDelegate(myDatabaseDelegate)
 
 ## Dependencies
 
-Networking builds on two companion packages:
+Networking relies on two packages:
 
-| Package | Purpose |
+| Package | Role |
 |---|---|
-| [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem) | Foundation framework providing dependency injection, persistence, logging, and developer tools. |
-| [Firebase](https://github.com/firebase/firebase-ios-sdk) | Backend services for authentication, database, and storage. |
+| [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem) | Provides the architectural foundation that Networking builds on – including dependency injection, persistence, state management, logging, caching, reactive observation, and developer tools. AppSubsystem must be initialized before Networking. |
+| [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) | Provides the default backend implementations for authentication (FirebaseAuth), real-time data (FirebaseDatabase), and file storage (FirebaseStorage). |
+
+AppSubsystem is _not_ an optional companion – it is a prerequisite. Networking extends AppSubsystem's type system by registering its own dependency keys, persistent storage keys, cache domains, logger domains, and Developer Mode actions. Without AppSubsystem, these registrations have no host system to attach to, and the framework cannot operate.
+
+For information on setting up AppSubsystem in your app, see the [AppSubsystem documentation](https://github.com/grantbrooksgoodman/app-subsystem).
 
 ---
 

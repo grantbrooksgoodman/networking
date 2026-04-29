@@ -13,7 +13,7 @@ import AppSubsystem
 import Translator
 
 // swiftlint:disable:next type_body_length
-final actor GeminiService {
+struct GeminiService {
     // MARK: - Types
 
     private struct CacheKey: Hashable {
@@ -31,7 +31,7 @@ final actor GeminiService {
 
     static let shared = GeminiService()
 
-    private var cachedEnhancedOutputValidationResults = [CacheKey: Exception?]()
+    private let cachedEnhancedOutputValidationResults = LockIsolated<[CacheKey: Exception?]>(wrappedValue: [:])
 
     // MARK: - Init
 
@@ -248,7 +248,7 @@ final actor GeminiService {
             translation: translation
         )
 
-        if let cachedValue = cachedEnhancedOutputValidationResults[cacheKey] {
+        if let cachedValue = cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] {
             return cachedValue
         }
 
@@ -344,7 +344,7 @@ final actor GeminiService {
             )
         }
 
-        cachedEnhancedOutputValidationResults[cacheKey] = exception
+        cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] = exception
         return exception
     }
 }

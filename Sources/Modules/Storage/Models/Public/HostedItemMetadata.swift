@@ -32,6 +32,8 @@ import FirebaseStorage
 public struct HostedItemMetadata: Sendable {
     // MARK: - Properties
 
+    // TODO: These don't need to be public.
+
     /// The destination path for the file in hosted
     /// storage.
     public let filePath: String

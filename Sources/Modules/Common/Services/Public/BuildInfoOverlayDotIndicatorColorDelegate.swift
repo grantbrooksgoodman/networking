@@ -28,7 +28,7 @@ public extension Networking {
         /// The shared delegate instance.
         public static let shared = BuildInfoOverlayDotIndicatorColorDelegate()
 
-        /// The color of the developer mode indicator dot,
+        /// The color of the Developer Mode indicator dot,
         /// based on the active network environment.
         public var developerModeIndicatorDotColor: Color {
             switch Networking.config.environment {

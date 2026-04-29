@@ -1,5 +1,5 @@
 //
-//  UserDefaultsKey+CommonExtensions.swift
+//  PersistentStorageKey+CommonExtensions.swift
 //
 //  Created by Grant Brooks Goodman.
 //  Copyright © NEOTechnica Corporation. All rights reserved.
@@ -11,21 +11,21 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-/// An enumeration of user defaults keys used by the
+/// An enumeration of persistent storage keys used by the
 /// networking module.
 ///
-/// Pass a case to ``UserDefaultsKey/networking(_:)`` to
-/// obtain the corresponding `UserDefaultsKey`:
+/// Pass a case to ``PersistentStorageKey/networking(_:)`` to
+/// obtain the corresponding `PersistentStorageKey`:
 ///
 /// ```swift
-/// let key = UserDefaultsKey.networking(
+/// let key = PersistentStorageKey.networking(
 ///     .networkEnvironment
 /// )
 /// ```
-public extension UserDefaultsKey {
+public extension PersistentStorageKey {
     // MARK: - Types
 
-    enum NetworkingDefaultsKey: String {
+    enum NetworkingStorageKey: String {
         /// The key for catalogued Gemini translation
         /// inputs.
         case geminiCataloguedTranslationInputs
@@ -40,12 +40,16 @@ public extension UserDefaultsKey {
 
     // MARK: - Methods
 
-    /// Returns the user defaults key for the specified
+    /// Returns the persistent storage key for the specified
     /// networking key.
     ///
-    /// - Parameter key: The networking defaults key.
+    /// - Parameter key: The networking storage key.
     ///
-    /// - Returns: A `UserDefaultsKey` for the specified
+    /// - Returns: A `PersistentStorageKey` for the specified
     ///   key.
-    static func networking(_ key: NetworkingDefaultsKey) -> UserDefaultsKey { .init(key.rawValue) }
+    static func networking(
+        _ key: NetworkingStorageKey
+    ) -> PersistentStorageKey {
+        .init(key.rawValue)
+    }
 }
