@@ -30,12 +30,12 @@ public protocol NetworkActivityIndicatorDelegate {
 
     /// The background color of the indicator.
     @MainActor
-    var backgroundColor: Color { get }
+    var backgroundColor: Color? { get }
 
     /// The tint color of the progress view inside the
     /// indicator.
     @MainActor
-    var progressViewTintColor: Color { get }
+    var progressViewTintColor: Color? { get }
 
     // MARK: - Methods
 
@@ -48,24 +48,19 @@ public protocol NetworkActivityIndicatorDelegate {
 
 /// A network activity indicator delegate that provides
 /// default appearance and behavior.
-///
-/// This delegate uses the app's accent color as the
-/// indicator background and white as the progress view
-/// tint.
 public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorDelegate {
     // MARK: - Properties
 
     /// The tint color of the progress view. The default
     /// is ``Color/white``.
     @MainActor
-    public let progressViewTintColor: Color = .white
+    public let progressViewTintColor: Color? = .white
 
     // MARK: - Computed Properties
 
-    /// The background color of the indicator, derived
-    /// from the app's accent color.
+    /// The background color of the indicator.
     @MainActor
-    public var backgroundColor: Color { .accent }
+    public var backgroundColor: Color? { nil }
 
     // MARK: - Init
 

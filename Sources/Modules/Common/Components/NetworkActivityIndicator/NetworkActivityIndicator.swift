@@ -8,6 +8,7 @@
 /* Native */
 import Foundation
 import SwiftUI
+import UIKit
 
 /* Proprietary */
 import AppSubsystem
@@ -15,6 +16,7 @@ import AppSubsystem
 struct NetworkActivityIndicator: View {
     // MARK: - Constants Accessors
 
+    private typealias Colors = AppConstants.Colors.NetworkActivityIndicator
     private typealias Floats = AppConstants.CGFloats.NetworkActivityIndicator
 
     // MARK: - Properties
@@ -33,7 +35,11 @@ struct NetworkActivityIndicator: View {
 
     var body: some View {
         Circle()
-            .foregroundStyle(viewModel.backgroundColor)
+            .if(
+                UIApplication.isFullyV26Compatible && viewModel.backgroundColor == nil,
+                { $0.foregroundStyle(.clear) },
+                else: { $0.foregroundStyle(viewModel.backgroundColor ?? .accent) }
+            )
             .padding(.all, Floats.padding)
             .frame(
                 width: Floats.frameWidth,
@@ -43,6 +49,18 @@ struct NetworkActivityIndicator: View {
                 ProgressView()
                     .dynamicTypeSize(.large)
                     .tint(viewModel.progressViewTintColor)
+            }
+            .if(
+                UIApplication.isFullyV26Compatible && viewModel.backgroundColor == nil
+            ) {
+                $0.glassEffect(
+                    isClear: true,
+                    padding: -1,
+                    shape: Circle(), // NIT: Consider allowing backgroundColor for this.
+                    tint: Colors.glassEffectTint.opacity(
+                        Floats.glassEffectTintOpacity
+                    )
+                )
             }
             .offset(y: viewModel.yOffset)
             .opacity(viewModel.isVisible ? 1 : 0)

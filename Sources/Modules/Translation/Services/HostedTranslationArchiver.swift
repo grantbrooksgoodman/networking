@@ -34,7 +34,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     // MARK: - Init
 
     init() {
-        Task.detached(priority: .utility) { [weak self] in
+        Task.background(delayedBy: .seconds(10)) { [weak self] in
             guard let exception = await self?.populateTranslationDataSnapshot(
                 expiryThreshold: .seconds(300)
             ) else {
@@ -293,50 +293,50 @@ final class HostedTranslationArchiver: @unchecked Sendable {
                 )
             }
 
-            for (languagePairKey, value) in dictionary {
-                for (translationKey, translationValue) in value {
-                    CoreDatabaseStore.addValue(
-                        .init(
-                            data: translationValue,
-                            expiresAfter: .seconds(600)
-                        ),
-                        forKey: "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/\(languagePairKey)/\(translationKey)"
-                    )
-                }
-            }
-
-            let translationDataSample = TranslationDataSample(
-                data: dictionary,
-                expiresAfter: expiryThreshold
-            )
-
             $state.withValue {
-                $0.translationDataSample = translationDataSample
+                $0.translationDataSample = TranslationDataSample(
+                    data: dictionary,
+                    expiresAfter: expiryThreshold
+                )
                 $0.isPopulating = false
             }
 
-            Task.detached(priority: .utility) {
-                self.localTranslationArchiver.addValues(
-                    translationDataSample
-                        .data
-                        .reduce(into: Set<Translation>()) { partialResult, dictionary in
-                            if let languagePair = LanguagePair(dictionary.key),
-                               let dataForLanguagePair = dictionary.value as? [String: String] {
-                                partialResult.formUnion(
-                                    dataForLanguagePair
-                                        .values
-                                        .compactMap(\.decodedTranslationComponents)
-                                        .map {
-                                            Translation(
-                                                input: .init($0.input),
-                                                output: $0.output,
-                                                languagePair: languagePair
-                                            )
-                                        }
-                                )
-                            }
+            Task.detached(priority: .background) { [weak self] in
+                guard let self else { return }
+
+                let captureDate = Date.now
+                let pathPrefix = "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/"
+
+                var dataSamples = [String: DataSample]()
+                dataSamples.reserveCapacity(dictionary.values.reduce(0) { $0 + $1.count })
+
+                var translations = Set<Translation>()
+
+                for (languagePairKey, value) in dictionary {
+                    let keyPrefix = "\(pathPrefix)\(languagePairKey)/"
+                    let languagePair = LanguagePair(languagePairKey)
+
+                    for (translationKey, translationValue) in value {
+                        dataSamples["\(keyPrefix)\(translationKey)"] = DataSample(
+                            captureDate,
+                            data: translationValue,
+                            expiresAfter: .seconds(600)
+                        )
+
+                        if let languagePair,
+                           let stringValue = translationValue as? String,
+                           let components = stringValue.decodedTranslationComponents {
+                            translations.insert(Translation(
+                                input: .init(components.input),
+                                output: components.output,
+                                languagePair: languagePair
+                            ))
                         }
-                )
+                    }
+                }
+
+                CoreDatabaseStore.addValues(dataSamples)
+                localTranslationArchiver.addValues(translations)
             }
 
             return nil

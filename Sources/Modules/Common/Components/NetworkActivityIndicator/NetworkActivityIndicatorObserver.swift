@@ -35,12 +35,6 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
     func onChange(of observable: Observable<Any>) {
         @Dependency(\.build) var build: Build
 
-        Logger.log(
-            "\(observable.value is Nil ? "Triggered" : "Observed change of") \(observable).",
-            domain: .observer,
-            sender: self
-        )
-
         switch observable {
         case Observables.isNetworkActivityOccurring:
             guard let value = observable.value as? Bool else { return }
