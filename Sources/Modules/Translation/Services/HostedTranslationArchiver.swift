@@ -152,46 +152,38 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             ))
         }
 
-        let getValuesResult = await database.getValues(at: path)
-
-        switch getValuesResult {
-        case let .success(values):
-            guard let string = values as? String else {
-                let exception: Exception = .Networking.typecastFailed(
-                    "string",
-                    userInfo: ["Value": values],
-                    metadata: .init(sender: self)
-                )
-                return .failure(exception.appending(userInfo: userInfo))
-            }
-
-            guard let components = string.decodedTranslationComponents else {
-                return .failure(
-                    .Networking.decodingFailed(
-                        data: string,
-                        .init(sender: self)
-                    ).appending(userInfo: userInfo)
-                )
-            }
-
-            return .success(
-                .init(
-                    input: .init(components.input),
-                    output: components.output,
-                    languagePair: languagePair
-                )
+        let translationDataString: String
+        do {
+            translationDataString = try await database.getValues(
+                at: path
             )
-
-        case let .failure(exception):
-            guard exception.isEqual(
+        } catch {
+            guard error.isEqual(
                 to: .Networking.Database.noValueExists
-            ) else { return .failure(exception.appending(userInfo: userInfo)) }
+            ) else { return .failure(error.appending(userInfo: userInfo)) }
             return await deriveTranslation(
                 input: nil,
                 inputValueEncodedHash: inputValueEncodedHash,
                 languagePair: languagePair
             )
         }
+
+        guard let components = translationDataString.decodedTranslationComponents else {
+            return .failure(
+                .Networking.decodingFailed(
+                    data: translationDataString,
+                    .init(sender: self)
+                ).appending(userInfo: userInfo)
+            )
+        }
+
+        return .success(
+            .init(
+                input: .init(components.input),
+                output: components.output,
+                languagePair: languagePair
+            )
+        )
     }
 
     // MARK: - Remove Archived Translations
@@ -281,69 +273,63 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         }
 
         guard shouldProceed else { return nil }
-        let getValuesResult = await database.getValues(at: NetworkPath.translations.rawValue)
+        let translationData: [String: [String: Any]]
 
-        switch getValuesResult {
-        case let .success(values):
-            guard let dictionary = values as? [String: [String: Any]] else {
-                $state.withValue { $0.isPopulating = false }
-                return .Networking.typecastFailed(
-                    "dictionary",
-                    metadata: .init(sender: self)
-                )
-            }
+        do {
+            translationData = try await database.getValues(
+                at: NetworkPath.translations.rawValue
+            )
+        } catch {
+            $state.withValue { $0.isPopulating = false }
+            return error
+        }
 
-            $state.withValue {
-                $0.translationDataSample = TranslationDataSample(
-                    data: dictionary,
-                    expiresAfter: expiryThreshold
-                )
-                $0.isPopulating = false
-            }
+        $state.withValue {
+            $0.translationDataSample = TranslationDataSample(
+                data: translationData,
+                expiresAfter: expiryThreshold
+            )
+            $0.isPopulating = false
+        }
 
-            Task.detached(priority: .background) { [weak self] in
-                guard let self else { return }
+        Task.detached(priority: .background) { [weak self] in
+            guard let self else { return }
 
-                let captureDate = Date.now
-                let pathPrefix = "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/"
+            let captureDate = Date.now
+            let pathPrefix = "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/"
 
-                var dataSamples = [String: DataSample]()
-                dataSamples.reserveCapacity(dictionary.values.reduce(0) { $0 + $1.count })
+            var dataSamples = [String: DataSample]()
+            dataSamples.reserveCapacity(translationData.values.reduce(0) { $0 + $1.count })
 
-                var translations = Set<Translation>()
+            var translations = Set<Translation>()
 
-                for (languagePairKey, value) in dictionary {
-                    let keyPrefix = "\(pathPrefix)\(languagePairKey)/"
-                    let languagePair = LanguagePair(languagePairKey)
+            for (languagePairKey, value) in translationData {
+                let keyPrefix = "\(pathPrefix)\(languagePairKey)/"
+                let languagePair = LanguagePair(languagePairKey)
 
-                    for (translationKey, translationValue) in value {
-                        dataSamples["\(keyPrefix)\(translationKey)"] = DataSample(
-                            captureDate,
-                            data: translationValue,
-                            expiresAfter: .seconds(600)
-                        )
+                for (translationKey, translationValue) in value {
+                    dataSamples["\(keyPrefix)\(translationKey)"] = DataSample(
+                        captureDate,
+                        data: translationValue,
+                        expiresAfter: .seconds(600)
+                    )
 
-                        if let languagePair,
-                           let stringValue = translationValue as? String,
-                           let components = stringValue.decodedTranslationComponents {
-                            translations.insert(Translation(
-                                input: .init(components.input),
-                                output: components.output,
-                                languagePair: languagePair
-                            ))
-                        }
+                    if let languagePair,
+                       let stringValue = translationValue as? String,
+                       let components = stringValue.decodedTranslationComponents {
+                        translations.insert(Translation(
+                            input: .init(components.input),
+                            output: components.output,
+                            languagePair: languagePair
+                        ))
                     }
                 }
-
-                CoreDatabaseStore.addValues(dataSamples)
-                localTranslationArchiver.addValues(translations)
             }
 
-            return nil
-
-        case let .failure(exception):
-            $state.withValue { $0.isPopulating = false }
-            return exception
+            CoreDatabaseStore.addValues(dataSamples)
+            localTranslationArchiver.addValues(translations)
         }
+
+        return nil
     }
 }

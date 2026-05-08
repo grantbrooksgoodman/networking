@@ -36,17 +36,36 @@ struct Database: DatabaseDelegate {
 
     // MARK: - Value Retrieval
 
-    /**
-     Gets the hosted values at the given path.
+    func getValues<T>(
+        at path: String,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) async throws (Exception) -> T {
+        let getValuesResult = await getValues(
+            at: path,
+            prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
 
-     - Parameter path: The hosting path at which to retrieve values.
-     - Parameter prependingEnvironment: Pass `true` to prepend the current network environment to the given `path`.
-     - Parameter cacheStrategy: The caching strategy to use; defaults to `.returnCacheFirst`.
-     - Parameter timeout: An optional timeout `Duration` for the operation; defaults to `.seconds(10)`.
+        switch getValuesResult {
+        case let .success(values):
+            guard let values = values as? T else {
+                throw .Networking.typecastFailed(
+                    String(T.self),
+                    metadata: .init(sender: self)
+                )
+            }
 
-     - Returns: A `Callback` type composed of the data value at the given path or an `Exception`.
-     */
-    func getValues(
+            return values
+
+        case let .failure(exception):
+            throw exception
+        }
+    }
+
+    private func getValues(
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
@@ -78,7 +97,38 @@ struct Database: DatabaseDelegate {
         }
     }
 
-    func queryValues(
+    func queryValues<T>(
+        at path: String,
+        strategy: QueryStrategy,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) async throws (Exception) -> T {
+        let queryValuesResult = await queryValues(
+            at: path,
+            strategy: strategy,
+            prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+
+        switch queryValuesResult {
+        case let .success(values):
+            guard let values = values as? T else {
+                throw .Networking.typecastFailed(
+                    String(T.self),
+                    metadata: .init(sender: self)
+                )
+            }
+
+            return values
+
+        case let .failure(exception):
+            throw exception
+        }
+    }
+
+    private func queryValues(
         at path: String,
         strategy: QueryStrategy,
         prependingEnvironment: Bool,

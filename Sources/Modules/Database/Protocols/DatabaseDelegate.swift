@@ -23,7 +23,9 @@ import AppSubsystem
 /// @Dependency(\.networking.database) var database: DatabaseDelegate
 ///
 /// // Read values at a path.
-/// let getValuesResult = await database.getValues(at: "users/123")
+/// let values: [String: Any] = try await database.getValues(
+///     at: "users/123"
+/// )
 ///
 /// // Write a value.
 /// let exception = await database.setValue(
@@ -52,7 +54,11 @@ public protocol DatabaseDelegate {
     ///   generation fails.
     func generateKey(for path: String) -> String?
 
-    /// Reads the value stored at the specified path.
+    /// Reads the value stored at the specified path as the
+    /// inferred type.
+    ///
+    /// If the value at the path cannot be cast to the
+    /// inferred type, this method throws.
     ///
     /// - Parameters:
     ///   - path: The database path to read from.
@@ -64,14 +70,17 @@ public protocol DatabaseDelegate {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, the value stored at the
-    ///   path.
-    func getValues(
+    /// - Returns: The value stored at the path, as type
+    ///   `T`.
+    ///
+    /// - Throws: An ``Exception`` if the read fails or
+    ///   the returned value cannot be cast to `T`.
+    func getValues<T>(
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
-    ) async -> Callback<Any, Exception>
+    ) async throws (Exception) -> T
 
     /// Returns a Boolean value that indicates whether
     /// the specified value can be stored in the database.
@@ -87,11 +96,11 @@ public protocol DatabaseDelegate {
     ///   otherwise, `false`.
     func isEncodable(_ value: Any) -> Bool
 
-    /// Queries a limited subset of values at the
-    /// specified path.
+    /// Queries a limited subset of values at the specified
+    /// path as the inferred type.
     ///
-    /// Use this method to retrieve a bounded number of
-    /// results rather than all values at a path.
+    /// If the queried values cannot be cast to the
+    /// inferred type, this method throws.
     ///
     /// - Parameters:
     ///   - path: The database path to query.
@@ -105,14 +114,17 @@ public protocol DatabaseDelegate {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, the queried values.
-    func queryValues(
+    /// - Returns: The queried values, as type `T`.
+    ///
+    /// - Throws: An ``Exception`` if the query fails or
+    ///   the returned values cannot be cast to `T`.
+    func queryValues<T>(
         at path: String,
         strategy: QueryStrategy,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
-    ) async -> Callback<Any, Exception>
+    ) async throws (Exception) -> T
 
     /// Overrides the cache strategy for all database
     /// operations.
@@ -181,7 +193,8 @@ public protocol DatabaseDelegate {
 }
 
 public extension DatabaseDelegate {
-    /// Reads the value stored at the specified path.
+    /// Reads the value stored at the specified path as the
+    /// inferred type.
     ///
     /// This method calls
     /// ``getValues(at:prependingEnvironment:cacheStrategy:timeout:)``
@@ -199,15 +212,18 @@ public extension DatabaseDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, the value stored at the
-    ///   path.
-    func getValues(
+    /// - Returns: The value stored at the path, as type
+    ///   `T`.
+    ///
+    /// - Throws: An ``Exception`` if the read fails or
+    ///   the returned value cannot be cast to `T`.
+    func getValues<T>(
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<Any, Exception> {
-        await getValues(
+    ) async throws (Exception) -> T {
+        try await getValues(
             at: path,
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
@@ -215,8 +231,8 @@ public extension DatabaseDelegate {
         )
     }
 
-    /// Queries a limited subset of values at the
-    /// specified path.
+    /// Queries a limited subset of values at the specified
+    /// path as the inferred type.
     ///
     /// This method calls
     /// ``queryValues(at:strategy:prependingEnvironment:cacheStrategy:timeout:)``
@@ -238,15 +254,18 @@ public extension DatabaseDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, the queried values.
-    func queryValues(
+    /// - Returns: The queried values, as type `T`.
+    ///
+    /// - Throws: An ``Exception`` if the query fails or
+    ///   the returned values cannot be cast to `T`.
+    func queryValues<T>(
         at path: String,
         strategy: QueryStrategy = .first(10),
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<Any, Exception> {
-        await queryValues(
+    ) async throws (Exception) -> T {
+        try await queryValues(
             at: path,
             strategy: strategy,
             prependingEnvironment: prependingEnvironment,

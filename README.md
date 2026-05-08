@@ -32,7 +32,7 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
 
 Networking builds on the foundation provided by [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem). Where AppSubsystem establishes the core architecture your app is built on – dependency injection, persistence, state management, reactive observation, and developer tools – Networking uses that architecture to deliver a complete backend services layer for iOS apps.
 
-**Your app must initialize AppSubsystem before using Networking.** The two frameworks share a single dependency graph, a single persistence layer, and a single set of developer tools. Networking registers its services, cache domains, logger domains, and Developer Mode actions directly into the infrastructure that AppSubsystem provides. As a result, Networking is _not a standalone framework_ – it requires a fully configured AppSubsystem environment to function.
+**Your app must initialize AppSubsystem before using Networking.** The two frameworks share a single dependency graph, a single persistence layer, and a single set of developer tools. Networking registers its services, cache domains, logger domains, and Developer Mode actions directly into the infrastructure that AppSubsystem provides. As a result, Networking is _not a standalone framework_ – it requires a [fully configured AppSubsystem environment](https://github.com/grantbrooksgoodman/app-subsystem#installation) to function.
 
 Networking is organized around six modules, each focused on a specific backend service:
 
@@ -122,7 +122,7 @@ After initialization, use the `@Dependency` property wrapper to access networkin
 ```swift
 @Dependency(\.networking) var networking: NetworkServices
 
-let getValuesResult = await networking.database.getValues(
+let values: [String: Any] = try await networking.database.getValues(
     at: "users/123"
 )
 ```
@@ -204,13 +204,15 @@ ContentView()
 
 ### Database
 
-The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated:
+The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. Read and query operations use typed throws — they return the result as an inferred type and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.database) var database: DatabaseDelegate
 
 // Read values at a path.
-let getValuesResult = await database.getValues(at: "users/123")
+let values: [String: Any] = try await database.getValues(
+    at: "users/123"
+)
 
 // Write a value.
 let exception = await database.setValue(
@@ -219,11 +221,15 @@ let exception = await database.setValue(
 )
 
 // Query children.
-let queryResult = await database.queryValues(
+let messages: [String: Any] = try await database.queryValues(
     at: "messages",
     strategy: .last(25)
 )
 ```
+
+Specify the expected return type using a variable annotation so the compiler can determine `T`.
+
+> **Important:** The type cast is performed at runtime. If the value stored at the path does not match the inferred type, the method throws a typecast exception. Ensure that the expected type matches the shape of your stored data.
 
 #### Cache Strategy
 
@@ -354,7 +360,7 @@ Networking relies on two packages:
 | [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem) | Provides the architectural foundation that Networking builds on – including dependency injection, persistence, state management, logging, caching, reactive observation, and developer tools. AppSubsystem must be initialized before Networking. |
 | [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) | Provides the default backend implementations for authentication (FirebaseAuth), real-time data (FirebaseDatabase), and file storage (FirebaseStorage). |
 
-AppSubsystem is _not_ an optional companion – it is a prerequisite. Networking extends AppSubsystem's type system by registering its own dependency keys, persistent storage keys, cache domains, logger domains, and Developer Mode actions. Without AppSubsystem, these registrations have no host system to attach to, and the framework cannot operate.
+AppSubsystem is a prerequisite – _not_ an optional companion. Networking extends AppSubsystem's type system by registering its own dependency keys, persistent storage keys, cache domains, logger domains, and Developer Mode actions. Without AppSubsystem, these registrations have no host system to attach to, and the framework cannot operate.
 
 For information on setting up AppSubsystem in your app, see the [AppSubsystem documentation](https://github.com/grantbrooksgoodman/app-subsystem).
 

@@ -59,7 +59,7 @@ public extension Exception {
             _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
-                "Serialized type values must conform to NSArray, NSDictionary, NSNull, NSNumber, or NSString.",
+                "Serialized values must conform to NSArray, NSDictionary, NSNull, NSNumber, or NSString.",
                 userInfo: ["Value": value],
                 metadata: metadata
             )
