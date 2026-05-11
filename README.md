@@ -19,6 +19,9 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
 - [Modules](#modules)
   - [Auth](#auth)
   - [Common](#common)
+    - [Serializable](#serializable)
+    - [RemotelyUpdatable](#remotelyupdatable)
+    - [Macros](#macros)
   - [Database](#database)
   - [Gemini](#gemini)
   - [Storage](#storage)
@@ -190,8 +193,260 @@ The Common module provides shared infrastructure used across all other modules.
 |---|---|
 | [`NetworkActivityIndicatorDelegate`](Sources/Modules/Common/Protocols/NetworkActivityIndicatorDelegate.swift) | Customizes the appearance and behavior of the network activity indicator overlay. |
 | [`Serializable`](Sources/Modules/Common/Protocols/SerializableProtocol.swift) | Defines a two-way encoding/decoding contract for types that are stored on the backend. |
-| [`Updatable`](Sources/Modules/Common/Protocols/UpdatableProtocol.swift) | Enables granular, key-based updates to individual properties of a remotely stored value. |
+| [`RemotelyUpdatable`](Sources/Modules/Common/Protocols/RemotelyUpdatableProtocol.swift) | Enables granular, key-based updates to individual properties of a remotely stored value. |
 | [`Validatable`](Sources/Modules/Common/Protocols/ValidatableProtocol.swift) | Declares an `isWellFormed` property for types that can verify their own structural integrity. |
+
+#### Serializable
+
+The [`Serializable`](Sources/Modules/Common/Protocols/SerializableProtocol.swift) protocol defines how a type converts to and from a serialized representation suitable for network storage.
+
+A conforming type declares one associated type – `Representation` – which specifies the serialized format (typically `[String: Any]` or `String`). It then provides three members:
+
+| Requirement | Purpose |
+|---|---|
+| `encoded` | A computed property that returns the serialized representation of the instance. |
+| `canDecode(from:)` | A static method that performs a lightweight structural check on a payload before decoding. |
+| `decode(from:)` | A static method that reconstructs an instance from serialized data. May perform network requests. |
+
+`decode(from:)` uses typed throws – it throws an `Exception` directly rather than returning a result wrapper.
+
+**Adopting Serializable**
+
+The simplest approach uses the `@Serializable` and `@Serialized` macros to generate the conformance automatically. Annotate the type with `@Serializable` and mark each serialized property with `@Serialized`:
+
+```swift
+@Serializable
+struct Document {
+    @Serialized let content: String
+    let identifier: String
+    @Serialized let revision: Int
+
+    init(
+        content: String,
+        revision: Int
+    ) {
+        self.content = content
+        self.revision = revision
+        identifier = UUID().uuidString
+    }
+}
+```
+
+The macro reads the initializer and generates a `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `decode(from:)`. Properties without `@Serialized` – like `identifier` above – are excluded from serialization entirely.
+
+To use a key name that differs from the property name, pass it as a string argument:
+
+```swift
+@Serialized("fromAccount") let fromAccountID: String
+```
+
+The generated conformance uses `[String: Any]` as its `Representation` and supports properties whose types can be extracted from a dictionary using `as?` – typically `String`, `Int`, `Bool`, `Double`, and arrays or optionals thereof. For types that require custom transforms, dependency injection, or nested `Serializable` decoding, write the conformance manually:
+
+```swift
+extension Activity: Serializable {
+    enum SerializableKey: String {
+        case action
+        case date
+        case userID
+    }
+
+    var encoded: [String: Any] {
+        [
+            SerializableKey.action.rawValue: action.rawValue,
+            SerializableKey.date.rawValue: dateFormatter.string(from: date),
+            SerializableKey.userID.rawValue: userID,
+        ]
+    }
+
+    static func canDecode(from data: [String: Any]) -> Bool { /* ... */ }
+
+    static func decode(
+        from data: [String: Any]
+    ) async throws(Exception) -> Activity { /* ... */ }
+}
+```
+
+Once a type conforms to `Serializable`, you can write it to the database through the `DatabaseDelegate`:
+
+```swift
+@Dependency(\.networking.database) var database: DatabaseDelegate
+
+if let exception = await database.setValue(
+    document.encoded,
+    forKey: "documents/\(document.identifier)"
+) {
+    Logger.log(exception)
+}
+```
+
+And reconstruct it from stored data:
+
+```swift
+let data: [String: Any] = try await database.getValues(
+    at: "documents/\(document.identifier)"
+)
+
+let decoded = try await Document.decode(from: data)
+```
+
+Types that only need serialization conform to `Serializable`. Types that also need to push single-property changes to the server conform to `RemotelyUpdatable`, which refines `Serializable`.
+
+#### RemotelyUpdatable
+
+The [`RemotelyUpdatable`](Sources/Modules/Common/Protocols/RemotelyUpdatableProtocol.swift) protocol refines `Serializable` to support key-based property updates. Rather than re-encoding and writing an entire record, conforming types can update a single field:
+
+```swift
+let updated = try await document.updateValue(
+    writing: 1,
+    forKey: .revision
+)
+```
+
+Like `decode(from:)`, `updateValue(writing:forKey:)` uses typed throws – it returns the updated instance directly and throws an `Exception` on failure.
+
+When multiple properties need to change together, use `updateValues(with:)` to apply them in a single atomic write:
+
+```swift
+let updated = try await document.updateValues(with: [
+    .content: "Updated content",
+    .revision: 2,
+])
+```
+
+This method validates all keys, applies changes locally, and writes only the modified fields to the database – without re-encoding the entire record. A default implementation is provided for types whose `Representation` is `[String: Any]`.
+
+Unlike `updateValue(writing:forKey:)`, `updateValues(with:)` does not call the `willWrite` or `didWrite` lifecycle hooks. Override the method directly when custom batch-write behavior is needed.
+
+**Conformance Requirements**
+
+`RemotelyUpdatable` builds on a type's existing `Serializable` conformance. The additional requirements are:
+
+| Requirement | Purpose |
+|---|---|
+| `identifier` | The identifier string used to construct the full database key path. |
+| `networkPath` | The base path for records of this type (for example, `"documents"`). |
+| `exposedKeys` | The serialization keys whose values can be updated remotely. |
+| `modifyKey(_:withValue:)` | Returns a modified in-memory copy with the specified key set to the new value, or `nil` on type mismatch. |
+
+The `SerializableKey` associated type is inferred from the signatures of your protocol requirement implementations – typically `modifyKey(_:withValue:)` or `exposedKeys`. It must be `Hashable` and `RawRepresentable<String>`.
+
+**Adopting RemotelyUpdatable**
+
+The simplest approach combines `@Serializable` with `@RemotelyUpdatable` and `@Updatable`. Add `@RemotelyUpdatable` to the type and mark each updatable property with `@Updatable`:
+
+```swift
+@RemotelyUpdatable
+@Serializable
+struct Document {
+    @Serialized let content: String
+    let identifier: String
+    @Serialized @Updatable let revision: Int
+
+    init(
+        content: String,
+        revision: Int
+    ) {
+        self.content = content
+        self.revision = revision
+        identifier = UUID().uuidString
+    }
+}
+```
+
+`@Serializable` generates the serialization boilerplate. `@RemotelyUpdatable` generates `copying(paramName:)` methods, `exposedKeys`, and `modifyKey(_:withValue:)`. The two macros are independent – if you wrote your `Serializable` conformance manually, apply `@RemotelyUpdatable` on its own.
+
+Then declare a `NetworkPath` for the type and provide the two remaining protocol requirements – `identifier` and `networkPath`:
+
+```swift
+extension NetworkPath {
+    static let documents = NetworkPath("documents")
+}
+
+extension Document: RemotelyUpdatable {
+    var networkPath: NetworkPath { .documents }
+}
+```
+
+The `identifier` property is already declared on `Document`, so the compiler satisfies the requirement automatically. If your model uses a different property name (for example, `id`), provide a computed property in the extension:
+
+```swift
+extension Document: RemotelyUpdatable {
+    var identifier: String { id }
+    var networkPath: NetworkPath { .documents }
+}
+```
+
+With a `NetworkPath` declared, the hard-coded path strings from earlier can use it as well:
+
+```swift
+let data: [String: Any] = try await database.getValues(
+    at: "\(NetworkPath.documents.rawValue)/\(document.identifier)"
+)
+```
+
+The default implementation of `updateValue(writing:forKey:)` uses `identifier` and `networkPath` to construct the database key path automatically. For the example above, writing to `.revision` produces the path `"documents/<identifier>/revision"`.
+
+**Lifecycle Hooks**
+
+The default `updateValue` implementation calls two hooks that conformers can override:
+
+- `willWrite(_:forKey:updating:)` – Called before the database write. Return `.proceed` to use the standard encoding ladder, `.encoded(_:)` to write a pre-encoded value, or `.handled(_:)` if the conformer performed the write itself. Throw an `Exception` to abort.
+- `didWrite(_:forKey:)` – Called after a successful write to perform side effects. The default implementation returns the updated instance unchanged.
+
+Use `willWrite` when a property requires custom encoding that the standard ladder cannot perform. For example, converting a `Date` to a timestamp string before writing:
+
+```swift
+func willWrite(
+    _ value: Any,
+    forKey key: SerializableKey,
+    updating updated: User
+) async throws(Exception) -> WriteAction<User> {
+    guard let date = value as? Date else { return .proceed }
+    return .encoded(Date.timestampFromOptional(date: date))
+}
+```
+
+#### Macros
+
+| Macro | Purpose |
+|---|---|
+| [`@Serializable`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Generates a complete `Serializable` conformance – `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `decode(from:)` – from `@Serialized` property markers. |
+| [`@Serialized`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Marks a stored property for inclusion in the generated `Serializable` conformance. Accepts an optional custom key name. |
+| [`@RemotelyUpdatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Generates `copying(paramName:)` methods for each initializer parameter, and optionally `exposedKeys` and `modifyKey(_:withValue:)` when `@Updatable` markers are present. |
+| [`@Updatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Marks a stored property as a remotely updatable serialization key. Generates no code on its own – serves as a marker for `@RemotelyUpdatable`. |
+
+**`@Serializable`** reads the type's first initializer and generates a complete `Serializable` conformance from the `@Serialized` property markers. Each `@Serialized` property must have a corresponding initializer parameter with the same name. Properties without the annotation are excluded from serialization. The generated conformance uses `[String: Any]` as its `Representation` and supports types that can be extracted with `as?`. For complex types that need custom transforms, nested decoding, or dependency injection, write the conformance manually instead.
+
+**`@RemotelyUpdatable`** reads the type's first initializer to determine parameter names, labels, and types. If the type declares more than one initializer, the macro emits a warning and uses the first. It generates a `copying(paramName:)` method for each parameter, returning a new instance with that single property replaced and all others preserved:
+
+```swift
+let updated = document.copying(revision: 2)
+```
+
+When one or more properties are also annotated with `@Updatable`, the macro generates `exposedKeys` and `modifyKey(_:withValue:)` as well, providing a complete `RemotelyUpdatable` conformance with no hand-written boilerplate.
+
+The generated `exposedKeys` and `modifyKey` signatures reference the serialization key enum by name. By default, the macro uses `SerializableKey`. If your enum has a different name, pass it to the `keyType` parameter:
+
+```swift
+@RemotelyUpdatable(keyType: "CodingKey")
+```
+
+> **Note:** The `keyType` is a string because the macro cannot see types declared in extensions or other files. When `@Updatable` markers are present, the macro emits a note if no enum with the specified name is found in the type's declaration body – this is informational, not an error, since the enum may be defined elsewhere.
+
+**`@Updatable`** accepts an optional `nilIf` parameter that controls when the generated `modifyKey` implementation sets an optional property to `nil` on the local copy. This affects only the in-memory copy – it does not change what is written to the server.
+
+| `nilIf` value | Behavior |
+|---|---|
+| `.isEmpty` | Sets the property to `nil` when the collection is empty. |
+| `.isBangQualifiedEmpty` | Sets the property to `nil` when the array satisfies `isBangQualifiedEmpty`. |
+| `.custom("expression")` | Sets the property to `nil` when the expression evaluates to `true`. Use `$0` for the incoming value. |
+
+```swift
+@Updatable(nilIf: .isBangQualifiedEmpty) let blockedUserIDs: [String]?
+@Updatable(nilIf: .custom("$0 == .init(timeIntervalSince1970: 0)")) let lastSignedIn: Date?
+```
+
+> **Note:** The `.custom` case requires a string literal. The macro reads the expression from source at compile time, so passing a variable or computed property reference does not work.
 
 #### Network Activity View Modifier
 
@@ -204,7 +459,7 @@ ContentView()
 
 ### Database
 
-The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. Read and query operations use typed throws — they return the result as an inferred type and throw an `Exception` on failure:
+The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. Read and query operations use typed throws – they return the result as an inferred type and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.database) var database: DatabaseDelegate
@@ -353,12 +608,13 @@ Networking.config.registerDatabaseDelegate(myDatabaseDelegate)
 
 ## Dependencies
 
-Networking relies on two packages:
+Networking relies on three packages:
 
 | Package | Role |
 |---|---|
 | [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem) | Provides the architectural foundation that Networking builds on – including dependency injection, persistence, state management, logging, caching, reactive observation, and developer tools. AppSubsystem must be initialized before Networking. |
 | [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) | Provides the default backend implementations for authentication (FirebaseAuth), real-time data (FirebaseDatabase), and file storage (FirebaseStorage). |
+| [SwiftSyntax](https://github.com/swiftlang/swift-syntax) | Powers the `@Serializable`, `@Serialized`, `@RemotelyUpdatable`, and `@Updatable` macros. Used only at compile time by the macro plugin target and does not contribute to your app's binary size. |
 
 AppSubsystem is a prerequisite – _not_ an optional companion. Networking extends AppSubsystem's type system by registering its own dependency keys, persistent storage keys, cache domains, logger domains, and Developer Mode actions. Without AppSubsystem, these registrations have no host system to attach to, and the framework cannot operate.
 

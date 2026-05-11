@@ -1,5 +1,5 @@
 //
-//  String+CommonExtensions.swift
+//  String+InternalCommonExtensions.swift
 //
 //  Created by Grant Brooks Goodman.
 //  Copyright © NEOTechnica Corporation. All rights reserved.
@@ -13,7 +13,7 @@ import AppSubsystem
 
 extension String {
     var prependingCurrentEnvironment: String {
-        return "\(Networking.config.environment.shortString)/\(trimmingLeadingForwardSlashes.trimmingTrailingForwardSlashes)"
+        "\(Networking.config.environment.shortString)/\(trimmingLeadingForwardSlashes.trimmingTrailingForwardSlashes)"
     }
 
     private var trimmingLeadingForwardSlashes: String {

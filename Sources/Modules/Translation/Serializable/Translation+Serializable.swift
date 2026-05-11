@@ -14,17 +14,12 @@ import Translator
 
 /// The ``Serializable`` conformance for `Translation`.
 ///
-/// This conformance uses ``TranslationReference`` as the
-/// serialized representation. Encoding produces a compact
-/// reference, and decoding resolves it back into a
-/// `Translation` – either from an inline value, the local
-/// archive, or the hosted archive.
+/// This conformance uses ``TranslationReference`` as its
+/// serialized ``Serializable/Representation``. Encoding
+/// produces a compact reference, and decoding resolves it
+/// back into a `Translation` – either from an inline
+/// value, the local archive, or the hosted archive.
 extension Translation: Serializable {
-    // MARK: - Type Aliases
-
-    /// The decoded type.
-    public typealias T = Translation
-
     // MARK: - Properties
 
     /// The serialized representation of this translation.
@@ -32,28 +27,38 @@ extension Translation: Serializable {
 
     // MARK: - Methods
 
-    /// Returns `true` for all translation references.
+    /// Returns `true` for all translation references,
+    /// because validity is determined during decoding
+    /// rather than upfront inspection.
     public static func canDecode(from data: TranslationReference) -> Bool { true }
 
-    /// Decodes a translation from the specified
-    /// reference.
+    /// Decodes a translation from the specified reference.
     ///
-    /// The decoding strategy depends on the reference
-    /// type:
+    /// The decoding strategy depends on the reference type:
     ///
-    /// - **Archived with inline value**: Decoded directly
+    /// - **Archived with inline value:** Decoded directly
     ///   without a network request.
-    /// - **Archived without value**: Resolved from the
-    ///   local archive first, then from the hosted
-    ///   archive if needed.
-    /// - **Idempotent**: Decoded directly from the
-    ///   Base64-encoded input.
+    /// - **Archived without inline value:** Resolved from
+    ///   the local archive first, falling back to the
+    ///   hosted archive if needed.
+    /// - **Idempotent:** Decoded directly from the
+    ///   Base64-encoded input. No network request is
+    ///   required because the input and output languages
+    ///   are the same.
+    ///
+    /// Successfully decoded translations are added to the
+    /// local archive for future lookups when their input
+    /// and output differ.
     ///
     /// - Parameter data: The translation reference to
     ///   decode.
     ///
-    /// - Returns: On success, the decoded translation.
-    public static func decode(from data: TranslationReference) async -> Callback<Translation, Exception> {
+    /// - Returns: The decoded `Translation`.
+    ///
+    /// - Throws: An `Exception` if decoding fails.
+    public static func decode(
+        from data: TranslationReference // swiftformat:disable all
+    ) async throws(Exception) -> Translation { // swiftformat:enable all
         @Dependency(\.translationArchiverDelegate) var localTranslationArchiver: TranslationArchiverDelegate
 
         func addToArchive(_ translation: Translation) {
@@ -65,7 +70,10 @@ extension Translation: Serializable {
         case let .archived(hash, value: value):
             if let value {
                 guard let components = value.decodedTranslationComponents else {
-                    return .failure(.Networking.decodingFailed(data: data, .init(sender: self)))
+                    throw .Networking.decodingFailed(
+                        data: data,
+                        .init(sender: self)
+                    )
                 }
 
                 let decoded: Translation = .init(
@@ -75,14 +83,14 @@ extension Translation: Serializable {
                 )
 
                 addToArchive(decoded)
-                return .success(decoded)
+                return decoded
             }
 
             if let archivedTranslation = localTranslationArchiver.getValue(
                 inputValueEncodedHash: hash,
                 languagePair: data.languagePair
             ) {
-                return .success(archivedTranslation)
+                return archivedTranslation
             }
 
             let findArchivedTranslationResult = await Networking
@@ -96,10 +104,10 @@ extension Translation: Serializable {
             switch findArchivedTranslationResult {
             case let .success(translation):
                 addToArchive(translation)
-                return .success(translation)
+                return translation
 
             case let .failure(exception):
-                return .failure(exception)
+                throw exception
             }
 
         case let .idempotent(encodedValue):
@@ -110,7 +118,7 @@ extension Translation: Serializable {
             )
 
             addToArchive(decoded)
-            return .success(decoded)
+            return decoded
         }
     }
 }

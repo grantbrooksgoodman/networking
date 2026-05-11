@@ -41,7 +41,7 @@ public extension AppException {
             public static let notSerialized: AppException = .init("7CC2")
 
             /// The serialization key is not updatable.
-            public static let notUpdatable: AppException = .init("6446")
+            public static let notRemotelyUpdatable: AppException = .init("6446")
 
             /// A type mismatch occurred for a
             /// serialization key.

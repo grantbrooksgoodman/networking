@@ -40,8 +40,8 @@ struct Database: DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async throws (Exception) -> T {
+        timeout duration: Duration // swiftformat:disable all
+    ) async throws(Exception) -> T { // swiftformat:enable all
         let getValuesResult = await getValues(
             at: path,
             prependingEnvironment: prependingEnvironment,
@@ -102,8 +102,8 @@ struct Database: DatabaseDelegate {
         strategy: QueryStrategy,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async throws (Exception) -> T {
+        timeout duration: Duration // swiftformat:disable all
+    ) async throws(Exception) -> T { // swiftformat:enable all
         let queryValuesResult = await queryValues(
             at: path,
             strategy: strategy,

@@ -79,8 +79,8 @@ public protocol DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async throws (Exception) -> T
+        timeout duration: Duration // swiftformat:disable all
+    ) async throws(Exception) -> T // swiftformat:enable all
 
     /// Returns a Boolean value that indicates whether
     /// the specified value can be stored in the database.
@@ -123,8 +123,8 @@ public protocol DatabaseDelegate {
         strategy: QueryStrategy,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async throws (Exception) -> T
+        timeout duration: Duration // swiftformat:disable all
+    ) async throws(Exception) -> T // swiftformat:enable all
 
     /// Overrides the cache strategy for all database
     /// operations.
@@ -221,8 +221,8 @@ public extension DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
-    ) async throws (Exception) -> T {
+        timeout duration: Duration = .seconds(10) // swiftformat:disable all
+    ) async throws(Exception) -> T { // swiftformat:enable all
         try await getValues(
             at: path,
             prependingEnvironment: prependingEnvironment,
@@ -263,8 +263,8 @@ public extension DatabaseDelegate {
         strategy: QueryStrategy = .first(10),
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
-    ) async throws (Exception) -> T {
+        timeout duration: Duration = .seconds(10) // swiftformat:disable all
+    ) async throws(Exception) -> T { // swiftformat:enable all
         try await queryValues(
             at: path,
             strategy: strategy,

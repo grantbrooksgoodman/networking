@@ -88,7 +88,7 @@ public extension Exception {
         /// - Parameters:
         ///   - key: The key that was not updatable.
         ///   - metadata: The exception metadata.
-        public static func notUpdatable(
+        public static func notRemotelyUpdatable(
             key: Any,
             _ metadata: ExceptionMetadata
         ) -> Exception {
@@ -125,14 +125,19 @@ public extension Exception {
         ///
         /// - Parameters:
         ///   - key: The key with the mismatched type.
+        ///   - type: The mismatched type.
         ///   - metadata: The exception metadata.
         public static func typeMismatch(
             key: Any,
+            type: some Any,
             _ metadata: ExceptionMetadata
         ) -> Exception {
             .init(
                 "Type mismatch for serialization key.",
-                userInfo: ["Key": key],
+                userInfo: [
+                    "Key": key,
+                    "MisatchedType": String(type),
+                ],
                 metadata: metadata
             )
         }
