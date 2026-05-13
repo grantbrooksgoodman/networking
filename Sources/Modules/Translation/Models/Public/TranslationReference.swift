@@ -26,9 +26,7 @@ import Translator
 ///
 /// ```swift
 /// let reference = translation.reference
-/// let decodeResult = await Translation.decode(
-///     from: reference
-/// )
+/// let decoded = try await Translation(from: reference)
 /// ```
 public struct TranslationReference: Codable, Equatable, Sendable {
     // MARK: - Types

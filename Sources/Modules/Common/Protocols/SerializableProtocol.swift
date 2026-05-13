@@ -30,9 +30,9 @@ import AppSubsystem
 ///         from data: [String: Any]
 ///     ) -> Bool { /* ... */ }
 ///
-///     static func decode(
+///     init(
 ///         from data: [String: Any]
-///     ) async throws(Exception) -> MyModel { /* ... */ }
+///     ) async throws(Exception) { /* ... */ }
 /// }
 /// ```
 ///
@@ -72,19 +72,17 @@ public protocol Serializable {
         from data: Representation
     ) -> Bool
 
-    /// Decodes an instance from the specified serialized
-    /// data.
+    /// Creates a new instance by decoding from the
+    /// specified serialized data.
     ///
     /// Decoding may involve network requests – for
     /// example, resolving nested references. Call this
-    /// method in an asynchronous context.
+    /// initializer in an asynchronous context.
     ///
     /// - Parameter data: The serialized data to decode.
     ///
-    /// - Returns: The decoded instance.
-    ///
     /// - Throws: An `Exception` if decoding fails.
-    static func decode(
+    init(
         from data: Representation // swiftformat:disable all
-    ) async throws(Exception) -> Self // swiftformat:enable all
+    ) async throws(Exception) // swiftformat:enable all
 }

@@ -62,7 +62,7 @@ public struct RemotelyUpdatableMacro: ExtensionMacro {
             ))
         }
 
-        // Generate modifyKey and exposedKeys when @Updatable markers exist
+        // Generate modifyKey and serializableKey when @Updatable markers exist
         if !exposedKeys.isEmpty,
            !declaration.memberBlock.members.contains(where: { member in
                guard let enumDecl = member.decl.as(EnumDeclSyntax.self) else { return false }
@@ -88,9 +88,10 @@ public struct RemotelyUpdatableMacro: ExtensionMacro {
             )
 
             generatedMembers.append(
-                generateExposedKeysProperty(
-                    exposedKeys,
-                    keyTypeName: keyTypeName
+                generateSerializableKeyMethod(
+                    typeName: typeName,
+                    keyTypeName: keyTypeName,
+                    exposedKeys: exposedKeys
                 )
             )
         }

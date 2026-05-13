@@ -12,7 +12,7 @@ import Foundation
 import AppSubsystem
 
 /// The action to take when writing a value during an
-/// ``RemotelyUpdatable/updateValue(writing:forKey:)`` call.
+/// ``RemotelyUpdatable/update(_:to:)`` call.
 ///
 /// Return one of these cases from
 /// ``RemotelyUpdatable/willWrite(_:forKey:updating:)`` to control

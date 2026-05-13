@@ -12,63 +12,80 @@ import Foundation
 import AppSubsystem
 
 /// A type whose individual properties can be written to
-/// the server by serialization key.
+/// the server by key path.
 ///
 /// Adopt `RemotelyUpdatable` when a model needs to push
 /// property changes to the database without re-encoding
 /// the entire record. `RemotelyUpdatable` refines
-/// ``Serializable``, so conforming types must also provide
-/// encoding and decoding.
+/// ``Serializable``, so conforming types must also
+/// provide encoding and decoding.
+///
+/// Update a single property using ``update(_:to:)``:
 ///
 /// ```swift
-/// let updated = try await user.updateValue(
-///     writing: true,
-///     forKey: .aiEnhancedTranslationsEnabled
+/// let updated = try await user.update(
+///     \.languageCode,
+///     to: "es"
 /// )
 /// ```
 ///
-/// When multiple properties need to change together, use
-/// ``updateValues(with:)`` to apply them in a single
-/// atomic write:
+/// The compiler enforces that the value matches the
+/// property's type, so type mismatches are caught at
+/// build time rather than at runtime. Types that use
+/// the `@RemotelyUpdatable` and `@Updatable` macros
+/// receive the key-path mapping automatically.
+///
+/// When multiple properties need to change together,
+/// pass an ``AssignBuilder`` closure to
+/// ``update(_:)`` to apply them in a single atomic
+/// write:
 ///
 /// ```swift
-/// let updated = try await user.updateValues(with: [
-///     .aiEnhancedTranslationsEnabled: true,
-///     .languageCode: "es",
-/// ])
+/// let updated = try await user.update {
+///     Assign(\.isSignedIn, to: true)
+///     Assign(\.languageCode, to: "es")
+/// }
 /// ```
 ///
-/// Each conformer declares its updatable keys in the
-/// ``exposedKeys`` property, and provides a
-/// ``networkPath`` and ``identifier`` so the default
-/// implementation can construct the database key path
-/// automatically (for example,
-/// `"users/<identifier>/aiEnhancedTranslationsEnabled"`).
+/// Each conformer provides a ``networkPath`` and
+/// ``identifier`` so the default implementation can
+/// construct the database key path automatically (for
+/// example, `"users/<identifier>/languageCode"`).
 ///
-/// The default ``updateValue(writing:forKey:)``
-/// implementation performs four steps:
+/// ## Write Lifecycle
+///
+/// The default ``update(_:to:)`` implementation
+/// performs four steps:
 ///
 /// 1. **Local modification** – calls
-///    ``modifyKey(_:withValue:)`` to produce an in-memory
-///    copy of the model with the property changed.
+///    ``modifyKey(_:withValue:)`` to produce an
+///    in-memory copy with the property changed.
 /// 2. **Pre-write hook** – calls
 ///    ``willWrite(_:forKey:updating:)`` to allow custom
 ///    encoding or early handling.
-/// 3. **Encoding and writing** – encodes the value using
-///    an encoding ladder (``Serializable``, array of
-///    ``Serializable``, or raw Foundation type) and writes
-///    it to the database.
+/// 3. **Encoding and writing** – encodes the value
+///    using an encoding ladder (``Serializable``, array
+///    of ``Serializable``, or raw Foundation type) and
+///    writes it to the database.
 /// 4. **Post-write hook** – calls
-///    ``didWrite(_:forKey:)`` to perform any side effects.
+///    ``didWrite(_:forKey:)`` to perform any side
+///    effects.
 ///
-/// Conformers can customize the write by overriding two
-/// hooks:
+/// > Important: The builder-based ``update(_:)`` does
+/// > not invoke the lifecycle hooks. Only the
+/// > single-property ``update(_:to:)`` method calls
+/// > ``willWrite(_:forKey:updating:)`` and
+/// > ``didWrite(_:forKey:)``.
+///
+/// Conformers can customize the single-property write
+/// by overriding two hooks:
 ///
 /// - ``willWrite(_:forKey:updating:)`` – Return a
 ///   ``WriteAction`` to override encoding, handle the
 ///   write entirely, or abort by throwing.
-/// - ``didWrite(_:forKey:)`` – Perform side effects after
-///   a successful write, such as clearing a cache.
+/// - ``didWrite(_:forKey:)`` – Perform side effects
+///   after a successful write, such as clearing a
+///   cache.
 public protocol RemotelyUpdatable: Serializable {
     // MARK: - Associated Types
 
@@ -81,14 +98,6 @@ public protocol RemotelyUpdatable: Serializable {
 
     // MARK: - Properties
 
-    /// The serialization keys whose values can be updated
-    /// remotely.
-    ///
-    /// ``updateValue(writing:forKey:)`` validates that the
-    /// requested key appears in this array before
-    /// proceeding.
-    var exposedKeys: [SerializableKey] { get }
-
     /// The identifier used in database key path
     /// construction.
     ///
@@ -98,6 +107,13 @@ public protocol RemotelyUpdatable: Serializable {
     var identifier: String { get }
 
     /// The base network path for records of this type.
+    ///
+    /// This value forms the first segment of the database
+    /// key path. For a type whose records are stored under
+    /// `"documents"`, the property returns
+    /// `NetworkPath("documents")`, and a write to the
+    /// `revision` key produces the path
+    /// `"documents/<identifier>/revision"`.
     var networkPath: NetworkPath { get }
 
     /// Whether `database.setValue` prepends the current
@@ -107,6 +123,28 @@ public protocol RemotelyUpdatable: Serializable {
     var networkPathPrependsCurrentEnvironment: Bool { get }
 
     // MARK: - Methods
+
+    /// Returns the serialization key corresponding to the
+    /// given key path, or `nil` if the key path does not
+    /// map to an updatable property.
+    ///
+    /// The default implementation returns `nil`. Types
+    /// annotated with `@RemotelyUpdatable` and `@Updatable`
+    /// receive a generated implementation that maps each
+    /// updatable property's key path to its
+    /// ``SerializableKey`` case.
+    ///
+    /// Manual conformers can override this method to
+    /// enable the type-safe ``update(_:to:)`` API.
+    ///
+    /// - Parameter keyPath: A key path rooted in the
+    ///   conforming type.
+    ///
+    /// - Returns: The corresponding serialization key, or
+    ///   `nil` if the key path is not updatable.
+    static func serializableKey(
+        for keyPath: PartialKeyPath<Self>
+    ) -> SerializableKey?
 
     /// Returns a modified in-memory copy of the receiver
     /// with the specified key set to the given value, or
@@ -129,72 +167,6 @@ public protocol RemotelyUpdatable: Serializable {
         withValue value: Any
     ) -> Self?
 
-    /// Writes the value for the specified key to the
-    /// server and returns the updated instance.
-    ///
-    /// The default implementation:
-    ///
-    /// 1. Validates that `key` is in ``exposedKeys``.
-    /// 2. Calls ``modifyKey(_:withValue:)`` to produce a
-    ///    local copy with the property changed.
-    /// 3. Calls ``willWrite(_:forKey:updating:)`` to
-    ///    allow custom encoding or early handling.
-    /// 4. Encodes and writes the value to the database
-    ///    using the encoding ladder.
-    /// 5. Calls ``didWrite(_:forKey:)`` for post-write
-    ///    side effects.
-    ///
-    /// The encoding ladder in step 4 tries, in order:
-    /// ``Serializable`` (single value), array of
-    /// ``Serializable`` (substituting
-    /// ``Array/bangQualifiedEmpty`` for empty arrays to
-    /// prevent key deletion), and finally raw Foundation
-    /// types.
-    ///
-    /// - Parameters:
-    ///   - value: The new value to write.
-    ///   - key: The serialization key to update.
-    ///
-    /// - Returns: The updated instance.
-    ///
-    /// - Throws: An `Exception` if the update fails.
-    func updateValue(
-        writing value: Any,
-        forKey key: SerializableKey // swiftformat:disable all
-    ) async throws(Exception) -> Self // swiftformat:enable all
-
-    /// Writes values for the specified keys to the server
-    /// and returns the updated instance.
-    ///
-    /// Use this method to apply multiple property changes
-    /// in a single atomic write rather than calling
-    /// ``updateValue(writing:forKey:)`` for each key
-    /// individually.
-    ///
-    /// A default implementation is provided when
-    /// ``Representation`` is `[String: Any]`. It validates
-    /// each key against ``exposedKeys``, applies
-    /// ``modifyKey(_:withValue:)`` to produce a locally
-    /// updated copy, and writes only the changed fields
-    /// to the database.
-    ///
-    /// This method does not invoke the
-    /// ``willWrite(_:forKey:updating:)`` or
-    /// ``didWrite(_:forKey:)`` hooks. Override it directly
-    /// to customize batch-write behavior.
-    ///
-    /// - Parameter data: A dictionary mapping
-    ///   serialization keys to their new values.
-    ///
-    /// - Returns: The updated instance.
-    ///
-    /// - Throws: An `Exception` if a key is not in
-    ///   ``exposedKeys``, if a value's type does not match
-    ///   the property, or if the database write fails.
-    func updateValues(
-        with data: [SerializableKey: Any] // swiftformat:disable all
-    ) async throws(Exception) -> Self // swiftformat:enable all
-
     /// Called before the database write to allow custom
     /// encoding or to handle the write entirely.
     ///
@@ -214,7 +186,7 @@ public protocol RemotelyUpdatable: Serializable {
     ///   - updated: The locally modified instance produced
     ///     by ``modifyKey(_:withValue:)``.
     ///
-    /// - Returns: The action the default `updateValue`
+    /// - Returns: The action the default ``update(_:to:)``
     ///   implementation should take.
     ///
     /// - Throws: An `Exception` to abort the update.
@@ -253,6 +225,58 @@ public extension RemotelyUpdatable {
 
     // MARK: - Methods
 
+    static func serializableKey(
+        for keyPath: PartialKeyPath<Self>
+    ) -> SerializableKey? {
+        nil
+    }
+
+    /// Writes the value for the property at the given key
+    /// path to the server and returns the updated instance.
+    ///
+    /// The compiler ensures that `value` matches the
+    /// property's type at compile time, so type mismatches
+    /// are caught during compilation rather than at
+    /// runtime.
+    ///
+    /// ```swift
+    /// let updated = try await document.update(
+    ///     \.revision,
+    ///     to: 2
+    /// )
+    /// ```
+    ///
+    /// The method resolves the key path to its
+    /// ``SerializableKey`` via ``serializableKey(for:)``
+    /// and then performs the four-step write lifecycle
+    /// described in the protocol overview.
+    ///
+    /// - Parameters:
+    ///   - keyPath: A key path to the property to update.
+    ///   - value: The new value for the property.
+    ///
+    /// - Returns: The updated instance.
+    ///
+    /// - Throws: An `Exception` if the key path does not
+    ///   correspond to an updatable property, or if the
+    ///   underlying write fails.
+    func update<Value>(
+        _ keyPath: KeyPath<Self, Value>,
+        to value: Value // swiftformat:disable all
+    ) async throws(Exception) -> Self { // swiftformat:enable all
+        guard let key = Self.serializableKey(for: keyPath) else {
+            throw .Networking.notRemotelyUpdatable(
+                key: keyPath,
+                .init(sender: self)
+            )
+        }
+
+        return try await updateValue(
+            writing: value,
+            forKey: key
+        )
+    }
+
     func willWrite(
         _ value: Any,
         forKey key: SerializableKey,
@@ -267,19 +291,104 @@ public extension RemotelyUpdatable {
     ) async throws(Exception) -> Self { // swiftformat:enable all
         updated
     }
+}
 
+extension RemotelyUpdatable where Representation == [String: Any] {
+    /// Writes multiple properties to the server in a
+    /// single atomic operation and returns the updated
+    /// instance.
+    ///
+    /// Use this method when two or more properties need
+    /// to change together. Each ``Assign`` value pairs a
+    /// key path with a new value, and the compiler
+    /// enforces that every value matches its property's
+    /// type at build time:
+    ///
+    /// ```swift
+    /// let updated = try await user.update {
+    ///     Assign(\.isSignedIn, to: true)
+    ///     Assign(\.languageCode, to: "es")
+    /// }
+    /// ```
+    ///
+    /// All changed fields are written in a single
+    /// `updateChildValues` call. This method does not
+    /// invoke the ``willWrite(_:forKey:updating:)`` or
+    /// ``didWrite(_:forKey:)`` lifecycle hooks.
+    ///
+    /// - Parameter build: A closure that returns one or
+    ///   more ``Assign`` values.
+    ///
+    /// - Returns: The updated instance.
+    ///
+    /// - Throws: An `Exception` if a key path does not
+    ///   correspond to an updatable property, if a
+    ///   value's type does not match the property, or
+    ///   if the database write fails.
+    public func update(
+        @AssignBuilder<Self> _ build: sending() -> [Assign<Self>] // swiftformat:disable all
+    ) async throws(Exception) -> Self { // swiftformat:enable all
+        var data: [PartialKeyPath<Self>: Any] = [:]
+        for assignment in build() {
+            data[assignment.keyPath] = assignment.value
+        }
+        return try await updateValues(with: data)
+    }
+
+    func updateValues(
+        with data: [PartialKeyPath<Self>: Any] // swiftformat:disable all
+    ) async throws(Exception) -> Self { // swiftformat:enable all
+        @Dependency(\.networking.database) var database: DatabaseDelegate
+
+        var updated = self
+        var changedKeys = Set<String>()
+
+        for (keyPath, value) in data {
+            guard let key = Self.serializableKey(for: keyPath) else {
+                throw .Networking.notRemotelyUpdatable(
+                    key: keyPath,
+                    .init(sender: self)
+                )
+            }
+
+            guard let modified = updated.modifyKey(
+                key,
+                withValue: value
+            ) else {
+                throw .Networking.typeMismatch(
+                    key: key,
+                    type: type(of: value),
+                    .init(sender: self)
+                )
+            }
+
+            updated = modified
+            changedKeys.insert(key.rawValue)
+        }
+
+        let parentKeyPath = [
+            networkPath.rawValue,
+            identifier,
+        ].joined(separator: "/")
+
+        if let exception = await database.updateChildValues(
+            forKey: parentKeyPath,
+            with: updated.encoded.filter { changedKeys.contains($0.key) },
+            prependingEnvironment: networkPathPrependsCurrentEnvironment
+        ) {
+            throw exception
+        }
+
+        return updated
+    }
+}
+
+extension RemotelyUpdatable {
     func updateValue(
         writing value: Any,
         forKey key: SerializableKey // swiftformat:disable all
     ) async throws(Exception) -> Self { // swiftformat:enable all
         @Dependency(\.networking.database) var database: DatabaseDelegate
-
-        guard exposedKeys.contains(key) else {
-            throw .Networking.notRemotelyUpdatable(
-                key: key,
-                .init(sender: self)
-            )
-        }
 
         guard let newValue = modifyKey(
             key,
@@ -356,52 +465,5 @@ public extension RemotelyUpdatable {
             newValue,
             forKey: key
         )
-    }
-}
-
-public extension RemotelyUpdatable where Representation == [String: Any] {
-    func updateValues(
-        with data: [SerializableKey: Any] // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
-        @Dependency(\.networking.database) var database: DatabaseDelegate
-
-        var updated = self
-        for keyPair in data {
-            guard exposedKeys.contains(keyPair.key) else {
-                throw .Networking.notRemotelyUpdatable(
-                    key: keyPair.key,
-                    .init(sender: self)
-                )
-            }
-
-            guard let modified = updated.modifyKey(
-                keyPair.key,
-                withValue: keyPair.value
-            ) else {
-                throw .Networking.typeMismatch(
-                    key: keyPair.key,
-                    type: type(of: keyPair.value),
-                    .init(sender: self)
-                )
-            }
-
-            updated = modified
-        }
-
-        let parentKeyPath = [
-            networkPath.rawValue,
-            identifier,
-        ].joined(separator: "/")
-
-        let changedKeys = Set(data.keys.map(\.rawValue))
-        if let exception = await database.updateChildValues(
-            forKey: parentKeyPath,
-            with: updated.encoded.filter { changedKeys.contains($0.key) },
-            prependingEnvironment: networkPathPrependsCurrentEnvironment
-        ) {
-            throw exception
-        }
-
-        return updated
     }
 }

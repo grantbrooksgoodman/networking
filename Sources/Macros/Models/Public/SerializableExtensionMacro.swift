@@ -76,7 +76,7 @@ public struct SerializableMacro: ExtensionMacro {
         var generatedMembers = [String]()
 
         generatedMembers.append(
-            generateSerializableKeyEnum(serializedProperties)
+            generateCanDecodeMethod(serializedProperties)
         )
 
         generatedMembers.append(
@@ -84,15 +84,14 @@ public struct SerializableMacro: ExtensionMacro {
         )
 
         generatedMembers.append(
-            generateCanDecodeMethod(serializedProperties)
-        )
-
-        generatedMembers.append(
-            generateDecodeMethod(
-                typeName: typeName,
+            generateInitializer(
                 serializedProperties: serializedProperties,
                 initializerParameters: initializerParameters
             )
+        )
+
+        generatedMembers.append(
+            generateSerializableKeyEnum(serializedProperties)
         )
 
         let conformanceClause = protocols.isEmpty ? "" : ": Serializable"

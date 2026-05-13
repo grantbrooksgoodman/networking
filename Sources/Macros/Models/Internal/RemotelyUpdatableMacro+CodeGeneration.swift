@@ -77,16 +77,29 @@ extension RemotelyUpdatableMacro {
         """
     }
 
-    static func generateExposedKeysProperty(
-        _ keys: [UpdatableKeyInfo],
-        keyTypeName: String
+    static func generateSerializableKeyMethod(
+        typeName: String,
+        keyTypeName: String,
+        exposedKeys: [UpdatableKeyInfo]
     ) -> String {
-        let keyCases = keys
-            .map { ".\($0.propertyName)" }
-            .joined(separator: ", ")
+        var switchCases = [String]()
+
+        for exposedKey in exposedKeys {
+            switchCases.append(
+                "case \\.\(exposedKey.propertyName): " +
+                    "return .\(exposedKey.propertyName)"
+            )
+        }
+
+        let switchBody = switchCases.joined(separator: "\n        ")
         return """
-        var exposedKeys: [\(keyTypeName)] {
-            [\(keyCases)]
+        static func serializableKey(
+            for keyPath: PartialKeyPath<\(typeName)>
+        ) -> \(keyTypeName)? {
+            switch keyPath {
+            \(switchBody)
+            default: return nil
+            }
         }
         """
     }

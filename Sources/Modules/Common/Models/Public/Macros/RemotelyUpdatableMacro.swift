@@ -40,11 +40,25 @@ import Foundation
 /// ```
 ///
 /// When one or more stored properties are also annotated
-/// with ``Updatable(nilIf:)``, the macro generates
-/// ``RemotelyUpdatable/exposedKeys`` and
-/// ``RemotelyUpdatable/modifyKey(_:withValue:)`` as well,
+/// with ``Updatable(nilIf:)``, the macro additionally
+/// generates ``RemotelyUpdatable/modifyKey(_:withValue:)``
+/// and ``RemotelyUpdatable/serializableKey(for:)``,
 /// eliminating the switch-based boilerplate that
-/// ``RemotelyUpdatable`` conformance would otherwise require.
+/// ``RemotelyUpdatable`` conformance would otherwise
+/// require.
+///
+/// The generated ``RemotelyUpdatable/serializableKey(for:)``
+/// implementation maps each `@Updatable` property's key
+/// path to its ``RemotelyUpdatable/SerializableKey``
+/// case, enabling the type-safe
+/// ``RemotelyUpdatable/update(_:to:)`` API:
+///
+/// ```swift
+/// let updated = try await document.update(
+///     \.revision,
+///     to: 2
+/// )
+/// ```
 ///
 /// The macro reads the type's first initializer to
 /// determine parameter names, labels, and types. It
@@ -55,14 +69,14 @@ import Foundation
 /// - Parameter keyType: The name of the
 ///   `RawRepresentable<String>` enum used as the
 ///   conformer's ``RemotelyUpdatable/SerializableKey``
-///   type. The generated `exposedKeys` and `modifyKey`
-///   signatures reference this type by name. Defaults
-///   to `"SerializableKey"`.
+///   type. The generated `modifyKey` and
+///   `serializableKey` signatures reference this type by
+///   name. Defaults to `"SerializableKey"`.
 @attached(
     extension,
     names: named(copying),
-    named(exposedKeys),
-    named(modifyKey)
+    named(modifyKey),
+    named(serializableKey)
 )
 public macro RemotelyUpdatable(
     keyType: String = "SerializableKey"
@@ -80,8 +94,8 @@ public macro RemotelyUpdatable(
 /// corresponding `copying(propertyName:)` method. This
 /// affects only the in-memory copy returned by
 /// `modifyKey`; it does not change what is written to
-/// the server. The ``RemotelyUpdatable`` protocol's default
-/// ``RemotelyUpdatable/updateValue(writing:forKey:)``
+/// the server. The ``RemotelyUpdatable`` protocol's
+/// default ``RemotelyUpdatable/update(_:to:)``
 /// implementation encodes and writes the original value
 /// you provide – the nil condition only governs how the
 /// local model is reconstructed.
@@ -144,20 +158,20 @@ public enum NilCondition {
 /// serialization key.
 ///
 /// This macro generates no code on its own. It serves as
-/// a marker that ``RemotelyUpdatable()`` reads when generating
-/// ``RemotelyUpdatable/exposedKeys`` and
-/// ``RemotelyUpdatable/modifyKey(_:withValue:)``.
+/// a marker that ``RemotelyUpdatable()`` reads when
+/// generating ``RemotelyUpdatable/modifyKey(_:withValue:)``
+/// and ``RemotelyUpdatable/serializableKey(for:)``.
 ///
 /// Properties annotated with `@Updatable` must
 /// correspond to a case on the conformer's
-/// ``RemotelyUpdatable/SerializableKey`` type with a matching
-/// name.
+/// ``RemotelyUpdatable/SerializableKey`` type with a
+/// matching name.
 ///
-/// - Parameter nilIf: An optional ``NilCondition``
-///   that controls when the generated
-///   ``RemotelyUpdatable/modifyKey(_:withValue:)`` sets this
-///   property to `nil` on the local copy. This does not
-///   affect the value written to the server.
+/// - Parameter nilIf: An optional ``NilCondition`` that
+///   controls when the generated
+///   ``RemotelyUpdatable/modifyKey(_:withValue:)`` sets
+///   this property to `nil` on the local copy. This does
+///   not affect the value written to the server.
 @attached(peer)
 public macro Updatable(
     nilIf: NilCondition? = nil

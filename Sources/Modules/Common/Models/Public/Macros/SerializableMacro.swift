@@ -16,8 +16,8 @@ import Foundation
 /// ``Serialized(_:)``. The macro generates a
 /// `SerializableKey` enum, an ``Serializable/encoded``
 /// dictionary, a ``Serializable/canDecode(from:)``
-/// method, and a ``Serializable/decode(from:)`` factory
-/// method:
+/// method, and an ``Serializable/init(from:)``
+/// initializer:
 ///
 /// ```swift
 /// @Serializable
@@ -42,8 +42,8 @@ import Foundation
 /// are excluded from serialization.
 ///
 /// The macro reads the type's first initializer to
-/// generate the ``Serializable/decode(from:)`` factory
-/// method. Each ``Serialized(_:)`` property must have a
+/// generate the ``Serializable/init(from:)``
+/// initializer. Each ``Serialized(_:)`` property must have a
 /// corresponding initializer parameter with the same
 /// name. If the type declares more than one initializer,
 /// the macro emits a warning and uses the first.
@@ -59,10 +59,10 @@ import Foundation
 @attached(
     extension,
     conformances: Serializable,
-    names: named(SerializableKey),
+    names: named(canDecode),
     named(encoded),
-    named(canDecode),
-    named(decode)
+    named(init),
+    named(SerializableKey)
 )
 public macro Serializable() = #externalMacro(
     module: "NetworkingMacros",
@@ -77,7 +77,7 @@ public macro Serializable() = #externalMacro(
 /// the generated `SerializableKey` enum and
 /// corresponding entries in ``Serializable/encoded``,
 /// ``Serializable/canDecode(from:)``, and
-/// ``Serializable/decode(from:)``.
+/// ``Serializable/init(from:)``.
 ///
 /// By default, the property name is used as the
 /// serialization key. Pass a string literal to use a

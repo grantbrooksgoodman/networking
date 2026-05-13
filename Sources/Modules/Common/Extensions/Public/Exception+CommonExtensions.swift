@@ -83,10 +83,11 @@ public extension Exception {
         }
 
         /// Creates an exception indicating that the
-        /// specified serialization key is not updatable.
+        /// specified property is not remotely updatable.
         ///
         /// - Parameters:
-        ///   - key: The key that was not updatable.
+        ///   - key: The serialization key or key path that
+        ///     could not be updated.
         ///   - metadata: The exception metadata.
         public static func notRemotelyUpdatable(
             key: Any,

@@ -32,7 +32,8 @@ extension Translation: Serializable {
     /// rather than upfront inspection.
     public static func canDecode(from data: TranslationReference) -> Bool { true }
 
-    /// Decodes a translation from the specified reference.
+    /// Creates a translation by decoding from the
+    /// specified reference.
     ///
     /// The decoding strategy depends on the reference type:
     ///
@@ -53,12 +54,10 @@ extension Translation: Serializable {
     /// - Parameter data: The translation reference to
     ///   decode.
     ///
-    /// - Returns: The decoded `Translation`.
-    ///
     /// - Throws: An `Exception` if decoding fails.
-    public static func decode(
+    public init(
         from data: TranslationReference // swiftformat:disable all
-    ) async throws(Exception) -> Translation { // swiftformat:enable all
+    ) async throws(Exception) { // swiftformat:enable all
         @Dependency(\.translationArchiverDelegate) var localTranslationArchiver: TranslationArchiverDelegate
 
         func addToArchive(_ translation: Translation) {
@@ -72,7 +71,7 @@ extension Translation: Serializable {
                 guard let components = value.decodedTranslationComponents else {
                     throw .Networking.decodingFailed(
                         data: data,
-                        .init(sender: self)
+                        .init(sender: Self.self)
                     )
                 }
 
@@ -83,14 +82,16 @@ extension Translation: Serializable {
                 )
 
                 addToArchive(decoded)
-                return decoded
+                self = decoded
+                return
             }
 
             if let archivedTranslation = localTranslationArchiver.getValue(
                 inputValueEncodedHash: hash,
                 languagePair: data.languagePair
             ) {
-                return archivedTranslation
+                self = archivedTranslation
+                return
             }
 
             let findArchivedTranslationResult = await Networking
@@ -104,7 +105,7 @@ extension Translation: Serializable {
             switch findArchivedTranslationResult {
             case let .success(translation):
                 addToArchive(translation)
-                return translation
+                self = translation
 
             case let .failure(exception):
                 throw exception
@@ -118,7 +119,7 @@ extension Translation: Serializable {
             )
 
             addToArchive(decoded)
-            return decoded
+            self = decoded
         }
     }
 }

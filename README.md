@@ -180,6 +180,7 @@ The Common module provides shared infrastructure used across all other modules.
 
 | Type | Purpose |
 |---|---|
+| [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) | A key-path–value pair used to express a single property change inside a builder-based `update` call. |
 | [`CacheStrategy`](Sources/Modules/Common/Models/Public/CacheStrategy.swift) | Controls how cached data is used during network operations. |
 | [`DataSample`](Sources/Modules/Common/Models/Public/DataSample.swift) | A time-stamped snapshot of data with configurable expiration. |
 | [`EnhancedTranslationStatusVerbosity`](Sources/Modules/Common/Models/Public/EnhancedTranslationStatusVerbosity.swift) | Controls the detail level of AI translation status messages. |
@@ -206,9 +207,9 @@ A conforming type declares one associated type – `Representation` – which sp
 |---|---|
 | `encoded` | A computed property that returns the serialized representation of the instance. |
 | `canDecode(from:)` | A static method that performs a lightweight structural check on a payload before decoding. |
-| `decode(from:)` | A static method that reconstructs an instance from serialized data. May perform network requests. |
+| `init(from:)` | An initializer that reconstructs an instance from serialized data. May perform network requests. |
 
-`decode(from:)` uses typed throws – it throws an `Exception` directly rather than returning a result wrapper.
+`init(from:)` uses typed throws – it throws an `Exception` directly rather than returning a result wrapper.
 
 **Adopting Serializable**
 
@@ -232,7 +233,7 @@ struct Document {
 }
 ```
 
-The macro reads the initializer and generates a `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `decode(from:)`. Properties without `@Serialized` – like `identifier` above – are excluded from serialization entirely.
+The macro reads the initializer and generates a `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `init(from:)`. Properties without `@Serialized` – like `identifier` above – are excluded from serialization entirely.
 
 To use a key name that differs from the property name, pass it as a string argument:
 
@@ -258,11 +259,13 @@ extension Activity: Serializable {
         ]
     }
 
-    static func canDecode(from data: [String: Any]) -> Bool { /* ... */ }
-
-    static func decode(
+    init(
         from data: [String: Any]
-    ) async throws(Exception) -> Activity { /* ... */ }
+    ) async throws(Exception) { /* ... */ }
+
+    static func canDecode(
+        from data: [String: Any]
+    ) -> Bool { /* ... */ }
 }
 ```
 
@@ -286,36 +289,33 @@ let data: [String: Any] = try await database.getValues(
     at: "documents/\(document.identifier)"
 )
 
-let decoded = try await Document.decode(from: data)
+let decoded = try await Document(from: data)
 ```
 
-Types that only need serialization conform to `Serializable`. Types that also need to push single-property changes to the server conform to `RemotelyUpdatable`, which refines `Serializable`.
+Types that only need serialization conform to `Serializable`. Types that also need to push changes to the server conform to `RemotelyUpdatable`, which refines `Serializable`.
 
 #### RemotelyUpdatable
 
-The [`RemotelyUpdatable`](Sources/Modules/Common/Protocols/RemotelyUpdatableProtocol.swift) protocol refines `Serializable` to support key-based property updates. Rather than re-encoding and writing an entire record, conforming types can update a single field:
+The [`RemotelyUpdatable`](Sources/Modules/Common/Protocols/RemotelyUpdatableProtocol.swift) protocol refines `Serializable` to support key-based property updates. Rather than re-encoding and writing an entire record, conforming types can update a single field using a key path:
 
 ```swift
-let updated = try await document.updateValue(
-    writing: 1,
-    forKey: .revision
-)
+let updated = try await document.update(\.revision, to: 1)
 ```
 
-Like `decode(from:)`, `updateValue(writing:forKey:)` uses typed throws – it returns the updated instance directly and throws an `Exception` on failure.
+The compiler ensures that the value matches the property's type, so type mismatches are caught at build time rather than at runtime. Types that use the `@RemotelyUpdatable` and `@Updatable` macros receive this key-path mapping automatically. Like `init(from:)`, `update(_:to:)` uses typed throws – it returns the updated instance directly and throws an `Exception` on failure.
 
-When multiple properties need to change together, use `updateValues(with:)` to apply them in a single atomic write:
+When multiple properties need to change together, pass a builder closure to `update(_:)` to apply them in a single atomic write:
 
 ```swift
-let updated = try await document.updateValues(with: [
-    .content: "Updated content",
-    .revision: 2,
-])
+let updated = try await document.update {
+    Assign(\.content, to: "Updated content")
+    Assign(\.revision, to: 2)
+}
 ```
 
-This method validates all keys, applies changes locally, and writes only the modified fields to the database – without re-encoding the entire record. A default implementation is provided for types whose `Representation` is `[String: Any]`.
+Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed key path with a new value, so the compiler rejects type mismatches at build time. The builder writes all changed fields in a single `updateChildValues` call and supports conditional assignments using `if` and `if`/`else`.
 
-Unlike `updateValue(writing:forKey:)`, `updateValues(with:)` does not call the `willWrite` or `didWrite` lifecycle hooks. Override the method directly when custom batch-write behavior is needed.
+> **Note:** The builder-based `update(_:)` does not invoke the `willWrite` or `didWrite` lifecycle hooks. Only the single-property `update(_:to:)` method calls these hooks.
 
 **Conformance Requirements**
 
@@ -325,10 +325,10 @@ Unlike `updateValue(writing:forKey:)`, `updateValues(with:)` does not call the `
 |---|---|
 | `identifier` | The identifier string used to construct the full database key path. |
 | `networkPath` | The base path for records of this type (for example, `"documents"`). |
-| `exposedKeys` | The serialization keys whose values can be updated remotely. |
 | `modifyKey(_:withValue:)` | Returns a modified in-memory copy with the specified key set to the new value, or `nil` on type mismatch. |
+| `serializableKey(for:)` | Maps a key path to its serialization key. Required for `update(_:to:)`. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
 
-The `SerializableKey` associated type is inferred from the signatures of your protocol requirement implementations – typically `modifyKey(_:withValue:)` or `exposedKeys`. It must be `Hashable` and `RawRepresentable<String>`.
+The `SerializableKey` associated type is inferred from the signatures of your protocol requirement implementations – typically `modifyKey(_:withValue:)`. It must be `Hashable` and `RawRepresentable<String>`.
 
 **Adopting RemotelyUpdatable**
 
@@ -353,7 +353,7 @@ struct Document {
 }
 ```
 
-`@Serializable` generates the serialization boilerplate. `@RemotelyUpdatable` generates `copying(paramName:)` methods, `exposedKeys`, and `modifyKey(_:withValue:)`. The two macros are independent – if you wrote your `Serializable` conformance manually, apply `@RemotelyUpdatable` on its own.
+`@Serializable` generates the serialization boilerplate. `@RemotelyUpdatable` generates `copying(paramName:)` methods, `modifyKey(_:withValue:)`, and `serializableKey(for:)`. The two macros are independent – if you wrote your `Serializable` conformance manually, apply `@RemotelyUpdatable` on its own.
 
 Then declare a `NetworkPath` for the type and provide the two remaining protocol requirements – `identifier` and `networkPath`:
 
@@ -384,11 +384,11 @@ let data: [String: Any] = try await database.getValues(
 )
 ```
 
-The default implementation of `updateValue(writing:forKey:)` uses `identifier` and `networkPath` to construct the database key path automatically. For the example above, writing to `.revision` produces the path `"documents/<identifier>/revision"`.
+The default `update(_:to:)` implementation uses `identifier` and `networkPath` to construct the database key path automatically. For the example above, updating `\.revision` produces the path `"documents/<identifier>/revision"`.
 
 **Lifecycle Hooks**
 
-The default `updateValue` implementation calls two hooks that conformers can override:
+The default `update(_:to:)` implementation calls two hooks that conformers can override:
 
 - `willWrite(_:forKey:updating:)` – Called before the database write. Return `.proceed` to use the standard encoding ladder, `.encoded(_:)` to write a pre-encoded value, or `.handled(_:)` if the conformer performed the write itself. Throw an `Exception` to abort.
 - `didWrite(_:forKey:)` – Called after a successful write to perform side effects. The default implementation returns the updated instance unchanged.
@@ -410,9 +410,9 @@ func willWrite(
 
 | Macro | Purpose |
 |---|---|
-| [`@Serializable`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Generates a complete `Serializable` conformance – `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `decode(from:)` – from `@Serialized` property markers. |
+| [`@Serializable`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Generates a complete `Serializable` conformance – `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `init(from:)` – from `@Serialized` property markers. |
 | [`@Serialized`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Marks a stored property for inclusion in the generated `Serializable` conformance. Accepts an optional custom key name. |
-| [`@RemotelyUpdatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Generates `copying(paramName:)` methods for each initializer parameter, and optionally `exposedKeys` and `modifyKey(_:withValue:)` when `@Updatable` markers are present. |
+| [`@RemotelyUpdatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Generates `copying(paramName:)` methods for each initializer parameter, and optionally `modifyKey(_:withValue:)` and `serializableKey(for:)` when `@Updatable` markers are present. |
 | [`@Updatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Marks a stored property as a remotely updatable serialization key. Generates no code on its own – serves as a marker for `@RemotelyUpdatable`. |
 
 **`@Serializable`** reads the type's first initializer and generates a complete `Serializable` conformance from the `@Serialized` property markers. Each `@Serialized` property must have a corresponding initializer parameter with the same name. Properties without the annotation are excluded from serialization. The generated conformance uses `[String: Any]` as its `Representation` and supports types that can be extracted with `as?`. For complex types that need custom transforms, nested decoding, or dependency injection, write the conformance manually instead.
@@ -423,9 +423,9 @@ func willWrite(
 let updated = document.copying(revision: 2)
 ```
 
-When one or more properties are also annotated with `@Updatable`, the macro generates `exposedKeys` and `modifyKey(_:withValue:)` as well, providing a complete `RemotelyUpdatable` conformance with no hand-written boilerplate.
+When one or more properties are also annotated with `@Updatable`, the macro generates `modifyKey(_:withValue:)` and `serializableKey(for:)` as well, providing a complete `RemotelyUpdatable` conformance with no hand-written boilerplate. The generated `serializableKey(for:)` maps each updatable property's key path to its `SerializableKey` case, enabling the type-safe `update(_:to:)` API.
 
-The generated `exposedKeys` and `modifyKey` signatures reference the serialization key enum by name. By default, the macro uses `SerializableKey`. If your enum has a different name, pass it to the `keyType` parameter:
+The generated signatures reference the serialization key enum by name. By default, the macro uses `SerializableKey`. If your enum has a different name, pass it to the `keyType` parameter:
 
 ```swift
 @RemotelyUpdatable(keyType: "CodingKey")

@@ -11,25 +11,32 @@ import SwiftSyntax
 import SwiftSyntaxMacros
 
 extension SerializableMacro {
-    static func generateSerializableKeyEnum(
+    static func generateCanDecodeMethod(
         _ properties: [SerializedProperty]
     ) -> String {
-        var cases = [String]()
+        let nonOptionalProperties = properties.filter { !$0.isOptional }
 
-        for property in properties {
-            if let customKeyName = property.customKeyName {
-                cases.append(
-                    "case \(property.propertyName) = \"\(customKeyName)\""
-                )
-            } else {
-                cases.append("case \(property.propertyName)")
+        if nonOptionalProperties.isEmpty {
+            return """
+            static func canDecode(from data: [String: Any]) -> Bool {
+                true
             }
+            """
         }
 
-        let caseBody = cases.joined(separator: "\n        ")
+        var checks = [String]()
+        for property in nonOptionalProperties {
+            let typeName = strippingOptionalWrapper(from: property.propertyType)
+            checks.append(
+                "data[SerializableKey.\(property.propertyName).rawValue] is \(typeName)"
+            )
+        }
+
+        let guardBody = checks.joined(separator: ",\n              ")
         return """
-        enum SerializableKey: String {
-            \(caseBody)
+        static func canDecode(from data: [String: Any]) -> Bool {
+            guard \(guardBody) else { return false }
+            return true
         }
         """
     }
@@ -87,38 +94,7 @@ extension SerializableMacro {
         return lines.joined(separator: "\n        ")
     }
 
-    static func generateCanDecodeMethod(
-        _ properties: [SerializedProperty]
-    ) -> String {
-        let nonOptionalProperties = properties.filter { !$0.isOptional }
-
-        if nonOptionalProperties.isEmpty {
-            return """
-            static func canDecode(from data: [String: Any]) -> Bool {
-                true
-            }
-            """
-        }
-
-        var checks = [String]()
-        for property in nonOptionalProperties {
-            let typeName = strippingOptionalWrapper(from: property.propertyType)
-            checks.append(
-                "data[SerializableKey.\(property.propertyName).rawValue] is \(typeName)"
-            )
-        }
-
-        let guardBody = checks.joined(separator: ",\n              ")
-        return """
-        static func canDecode(from data: [String: Any]) -> Bool {
-            guard \(guardBody) else { return false }
-            return true
-        }
-        """
-    }
-
-    static func generateDecodeMethod(
-        typeName: String,
+    static func generateInitializer(
         serializedProperties: [SerializedProperty],
         initializerParameters: [RemotelyUpdatableMacro.InitializerParameter]
     ) -> String {
@@ -168,16 +144,16 @@ extension SerializableMacro {
 
         let initCall = initArguments.joined(separator: ", ")
 
-        // Assemble method body
+        // Assemble initializer body
         var lines = [String]()
-        lines.append("static func decode(")
+        lines.append("init(")
         lines.append("    from data: [String: Any]")
-        lines.append(") async throws(Exception) -> \(typeName) {")
+        lines.append(") async throws(Exception) {")
 
         if !guardLetClauses.isEmpty {
             let guardBody = guardLetClauses.joined(separator: ",\n              ")
             lines.append("    guard \(guardBody) else {")
-            lines.append("        throw .Networking.decodingFailed(data: data, .init(sender: self))")
+            lines.append("        throw .Networking.decodingFailed(data: data, .init(sender: Self.self))")
             lines.append("    }")
         }
 
@@ -192,10 +168,33 @@ extension SerializableMacro {
             lines.append("")
         }
 
-        lines.append("    return .init(\(initCall))")
+        lines.append("    self.init(\(initCall))")
         lines.append("}")
 
         return lines.joined(separator: "\n        ")
+    }
+
+    static func generateSerializableKeyEnum(
+        _ properties: [SerializedProperty]
+    ) -> String {
+        var cases = [String]()
+
+        for property in properties {
+            if let customKeyName = property.customKeyName {
+                cases.append(
+                    "case \(property.propertyName) = \"\(customKeyName)\""
+                )
+            } else {
+                cases.append("case \(property.propertyName)")
+            }
+        }
+
+        let caseBody = cases.joined(separator: "\n        ")
+        return """
+        enum SerializableKey: String {
+            \(caseBody)
+        }
+        """
     }
 
     // MARK: - Auxiliary
