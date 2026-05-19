@@ -40,8 +40,12 @@ import AppSubsystem
 /// to use a raw path.
 ///
 /// A default implementation backed by Firebase Realtime
-/// Database is provided automatically. To supply a custom
-/// conformance, register it with
+/// Database is provided automatically. The default
+/// implementation coalesces identical concurrent
+/// operations – when multiple callers perform the same
+/// operation at the same time, only one network request is
+/// made and all callers receive the same result. To supply
+/// a custom conformance, register it with
 /// ``Networking/Config/registerDatabaseDelegate(_:)``.
 // swiftlint:disable:next class_delegate_protocol
 public protocol DatabaseDelegate {
@@ -79,8 +83,8 @@ public protocol DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration // swiftformat:disable all
-    ) async throws(Exception) -> T // swiftformat:enable all
+        timeout duration: Duration
+    ) async throws(Exception) -> T
 
     /// Returns a Boolean value that indicates whether
     /// the specified value can be stored in the database.
@@ -95,6 +99,16 @@ public protocol DatabaseDelegate {
     /// - Returns: `true` if the value is encodable;
     ///   otherwise, `false`.
     func isEncodable(_ value: Any) -> Bool
+
+    /// Establishes the underlying connection to the
+    /// database without performing a data operation.
+    ///
+    /// Call this method early in the app lifecycle to
+    /// overlap connection setup with other
+    /// initialization work. The method returns
+    /// immediately; connection establishment proceeds
+    /// in the background.
+    func prewarm()
 
     /// Queries a limited subset of values at the specified
     /// path as the inferred type.
@@ -123,8 +137,8 @@ public protocol DatabaseDelegate {
         strategy: QueryStrategy,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration // swiftformat:disable all
-    ) async throws(Exception) -> T // swiftformat:enable all
+        timeout duration: Duration
+    ) async throws(Exception) -> T
 
     /// Overrides the cache strategy for all database
     /// operations.
@@ -221,8 +235,8 @@ public extension DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10) // swiftformat:disable all
-    ) async throws(Exception) -> T { // swiftformat:enable all
+        timeout duration: Duration = .seconds(10)
+    ) async throws(Exception) -> T {
         try await getValues(
             at: path,
             prependingEnvironment: prependingEnvironment,
@@ -263,8 +277,8 @@ public extension DatabaseDelegate {
         strategy: QueryStrategy = .first(10),
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10) // swiftformat:disable all
-    ) async throws(Exception) -> T { // swiftformat:enable all
+        timeout duration: Duration = .seconds(10)
+    ) async throws(Exception) -> T {
         try await queryValues(
             at: path,
             strategy: strategy,

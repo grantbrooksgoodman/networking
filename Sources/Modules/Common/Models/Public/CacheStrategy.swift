@@ -15,6 +15,8 @@ import Foundation
 /// cache strategy to control whether cached results are
 /// preferred, used as a fallback, or bypassed entirely.
 public enum CacheStrategy: Sendable {
+    // MARK: - Cases
+
     /// Ignores any cached data and always fetches from
     /// the network.
     case disregardCache
@@ -26,4 +28,14 @@ public enum CacheStrategy: Sendable {
     /// Fetches from the network first, and falls back to
     /// cached data only if the request fails.
     case returnCacheOnFailure
+
+    // MARK: - Properties
+
+    var rawValue: String {
+        switch self {
+        case .disregardCache: "disregardCache"
+        case .returnCacheFirst: "returnCacheFirst"
+        case .returnCacheOnFailure: "returnCacheOnFailure"
+        }
+    }
 }

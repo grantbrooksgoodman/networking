@@ -31,7 +31,7 @@ struct GeminiService {
 
     static let shared = GeminiService()
 
-    private let cachedEnhancedOutputValidationResults = LockIsolated<[CacheKey: Exception?]>(wrappedValue: [:])
+    private let cachedEnhancedOutputValidationResults = LockIsolated<[CacheKey: Exception?]>([:])
 
     // MARK: - Init
 

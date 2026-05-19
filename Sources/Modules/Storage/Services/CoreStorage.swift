@@ -25,7 +25,9 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+    private static let coalescer = KeyedCoalescer<String, Callback<Any?, Exception>>()
+
+    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(nil)
 
     @LockIsolated private var storedDownloadItemResults = [String: DataSample]()
     @LockIsolated private var storedItemExistsResults = [String: DataSample]()
@@ -43,9 +45,59 @@ final class CoreStorage: @unchecked Sendable {
         self.globalCacheStrategy = globalCacheStrategy
     }
 
+    // MARK: - Prewarming
+
+    func prewarm() {
+        Logger.log(
+            "Prewarming storage connection.",
+            domain: .Networking.storage,
+            sender: self
+        )
+
+        Task {
+            _ = try? await firebaseStorage
+                .child("prewarm")
+                .getMetadata()
+        }
+    }
+
     // MARK: - Perform Operation
 
     func performOperation(
+        _ operation: StorageOperation,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Any?, Exception> {
+        await Self.coalescer(
+            String.fromCurrentEditorContext(
+                sender: self
+            ) + "/" + (
+                operation.encodedHash
+                    + (globalCacheStrategy?.rawValue ?? "")
+                    + prependingEnvironment.description
+                    + duration.description
+            ).encodedHash
+        ) { [weak self] in
+            guard let self else {
+                return .failure(.init(
+                    "Service has been deallocated.",
+                    metadata: .init(sender: Self.self)
+                ))
+            }
+
+            return await withCheckedContinuation { continuation in
+                self._performOperation(
+                    operation,
+                    prependingEnvironment: prependingEnvironment,
+                    timeout: duration
+                ) { callback in
+                    continuation.resume(returning: callback)
+                }
+            }
+        }
+    }
+
+    private func _performOperation(
         _ operation: StorageOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration,
@@ -276,8 +328,8 @@ final class CoreStorage: @unchecked Sendable {
                 for filePath in directoryListing.filePaths {
                     taskGroup.addTask {
                         switch await self.deleteItem(at: filePath) {
-                        case let .failure(exception): return exception
-                        case .success: return nil
+                        case let .failure(exception): exception
+                        case .success: nil
                         }
                     }
                 }
@@ -416,8 +468,8 @@ final class CoreStorage: @unchecked Sendable {
                             to: destination,
                             cacheStrategy: cacheStrategy
                         ) {
-                        case let .failure(exception): return exception
-                        case .success: return nil
+                        case let .failure(exception): exception
+                        case .success: nil
                         }
                     }
                 }
@@ -483,12 +535,10 @@ final class CoreStorage: @unchecked Sendable {
         firstResultOnly: Bool = false
     ) async -> Callback<DirectoryListing, Exception> {
         do {
-            var listResult: StorageListResult!
-
-            if firstResultOnly {
-                listResult = try await firebaseStorage.child(path).list(maxResults: 1)
+            let listResult: StorageListResult! = if firstResultOnly {
+                try await firebaseStorage.child(path).list(maxResults: 1)
             } else {
-                listResult = try await firebaseStorage.child(path).listAll()
+                try await firebaseStorage.child(path).listAll()
             }
 
             let directoryListing = DirectoryListing(listResult)

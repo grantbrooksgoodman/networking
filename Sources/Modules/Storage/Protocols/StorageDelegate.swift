@@ -41,8 +41,12 @@ import AppSubsystem
 /// to use a raw path.
 ///
 /// A default implementation backed by Firebase Cloud
-/// Storage is provided automatically. To supply a custom
-/// conformance, register it with
+/// Storage is provided automatically. The default
+/// implementation coalesces identical concurrent
+/// operations – when multiple callers perform the same
+/// operation at the same time, only one network request is
+/// made and all callers receive the same result. To supply
+/// a custom conformance, register it with
 /// ``Networking/Config/registerStorageDelegate(_:)``.
 // swiftlint:disable:next class_delegate_protocol
 public protocol StorageDelegate: Sendable {
@@ -210,6 +214,16 @@ public protocol StorageDelegate: Sendable {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Bool, Exception>
+
+    /// Establishes the underlying connection to hosted
+    /// storage without performing a data operation.
+    ///
+    /// Call this method early in the app lifecycle to
+    /// overlap connection setup with other
+    /// initialization work. The method returns
+    /// immediately; connection establishment proceeds
+    /// in the background.
+    func prewarm()
 
     /// Overrides the cache strategy for all storage
     /// operations.

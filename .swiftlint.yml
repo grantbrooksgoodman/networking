@@ -11,9 +11,6 @@ nesting:
   type_level: 3
   function_level: 3
 
-excluded:
-- Pods
-
 # Upgrade default rules to error, instead of warning
 # Make error values equal to the warning values
 
@@ -64,6 +61,8 @@ for_where:
 function_body_length:
   warning: 100
   error: 100
+function_name_whitespace:
+  severity: error
 function_parameter_count:
   error: 5
 generic_type_name:
@@ -77,6 +76,8 @@ identifier_name:
   max_length:
     error: 40
 implicit_getter:
+  severity: error
+implicit_optional_initialization:
   severity: error
 inclusive_language:
   severity: error
@@ -114,8 +115,6 @@ ns_number_init_as_function_reference:
   severity: error
 nsobject_prefer_isequal:
   severity: error
-operator_whitespace:
-  severity: error
 orphaned_doc_comment:
   severity: error
 private_over_fileprivate:
@@ -129,8 +128,6 @@ reduce_boolean:
 redundant_discardable_let:
   severity: error
 redundant_objc_attribute:
-  severity: error
-redundant_optional_initialization:
   severity: error
 redundant_set_access_control:
   severity: error

@@ -22,9 +22,20 @@ import Foundation
 /// )
 /// ```
 public enum QueryStrategy {
+    // MARK: - Cases
+
     /// Returns the first *n* results.
     case first(Int)
 
     /// Returns the last *n* results.
     case last(Int)
+
+    // MARK: - Properties
+
+    var rawValue: String {
+        switch self {
+        case let .first(number): "first_\(number)"
+        case let .last(number): "last_\(number)"
+        }
+    }
 }

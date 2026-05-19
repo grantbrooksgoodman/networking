@@ -31,7 +31,7 @@ final class ReadWriteEnablementStatusService {
 
         forcedUpdateModalDelegate
             .forcedUpdateRequiredPublisher
-            .filter { $0 }
+            .filter(\.self)
             .prefix(1)
             .sink { _ in
                 Networking.isReadWriteEnabled = false
@@ -43,12 +43,12 @@ final class ReadWriteEnablementStatusService {
 extension Networking {
     // MARK: - Properties
 
-    private static let _isReadWriteEnabled = LockIsolated<Bool>(wrappedValue: true)
+    private static let _isReadWriteEnabled = LockIsolated(true)
 
     // MARK: - Computed Properties
 
     static var isReadWriteEnabled: Bool {
         get { _isReadWriteEnabled.wrappedValue }
-        set { _isReadWriteEnabled.projectedValue.withValue { $0 = newValue } }
+        set { _isReadWriteEnabled.wrappedValue = newValue }
     }
 }

@@ -8,6 +8,9 @@
 /* Native */
 import Foundation
 
+/* Proprietary */
+import AppSubsystem
+
 /* 3rd-party */
 import FirebaseStorage
 
@@ -29,7 +32,7 @@ import FirebaseStorage
 ///     metadata: metadata
 /// )
 /// ```
-public struct HostedItemMetadata: Sendable {
+public struct HostedItemMetadata: EncodedHashable, Sendable {
     // MARK: - Properties
 
     // TODO: These don't need to be public.
@@ -57,6 +60,26 @@ public struct HostedItemMetadata: Sendable {
     /// A dictionary of custom metadata key-value pairs
     /// to associate with the file.
     public let customValues: [String: String]?
+
+    // MARK: - Computed Properties
+
+    public var hashFactors: [String] {
+        var factors = [
+            filePath,
+            cacheControl ?? "",
+            contentDisposition ?? "",
+            contentEncoding ?? "",
+            contentLanguage ?? "",
+            contentType ?? "",
+        ]
+
+        if let customValues {
+            factors.append(contentsOf: customValues.keys)
+            factors.append(contentsOf: customValues.values)
+        }
+
+        return factors.sorted()
+    }
 
     // MARK: - Init
 

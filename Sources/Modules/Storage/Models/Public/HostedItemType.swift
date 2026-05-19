@@ -16,10 +16,21 @@ import Foundation
 /// to check whether a file or directory exists at the
 /// specified path.
 public enum HostedItemType: Sendable {
+    // MARK: - Cases
+
     /// A directory that may contain files or
     /// subdirectories.
     case directory
 
     /// A single file.
     case file
+
+    // MARK: - Properties
+
+    var rawValue: String {
+        switch self {
+        case .directory: "directory"
+        case .file: "file"
+        }
+    }
 }

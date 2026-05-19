@@ -53,9 +53,12 @@ import Foundation
 /// types can be extracted from a dictionary using `as?`
 /// – typically `String`, `Int`, `Bool`, `Double`, and
 /// arrays or optionals thereof – work automatically.
-/// For types that require custom transforms, dependency
-/// injection, or nested ``Serializable`` decoding, write
-/// the conformance manually.
+/// Properties that require custom encoding or decoding
+/// can supply `encode` and `decode` transforms through
+/// ``Serialized(_:encodedAs:encode:decode:)``. For types
+/// that require dependency injection or nested
+/// ``Serializable`` decoding, write the conformance
+/// manually.
 @attached(
     extension,
     conformances: Serializable,
@@ -87,6 +90,9 @@ public macro Serializable() = #externalMacro(
 /// @Serialized("fromAccount") let fromAccountID: String
 /// ```
 ///
+/// To apply custom encode and decode transforms, use
+/// ``Serialized(_:encodedAs:encode:decode:)``.
+///
 /// - Parameter keyName: An optional custom key name
 ///   used as the raw value of the generated
 ///   `SerializableKey` case. When `nil`, the property
@@ -94,6 +100,63 @@ public macro Serializable() = #externalMacro(
 @attached(peer)
 public macro Serialized(
     _ keyName: String? = nil
+) = #externalMacro(
+    module: "NetworkingMacros",
+    type: "SerializedMacro"
+)
+
+/// Marks a stored property for inclusion in the
+/// generated ``Serializable`` conformance, applying
+/// custom encode and decode transforms.
+///
+/// Use this overload when the property's Swift type
+/// differs from its serialized representation. The
+/// `encodedAs` parameter specifies the type stored in
+/// the database, and the `encode` and `decode` closures
+/// convert between the two:
+///
+/// ```swift
+/// @Serialized(
+///     encodedAs: String.self,
+///     encode: { DateFormatter.timestamp($0) },
+///     decode: { DateFormatter.date(from: $0) }
+/// )
+/// let lastSignedIn: Date
+/// ```
+///
+/// You can combine a custom key name with transforms:
+///
+/// ```swift
+/// @Serialized(
+///     "signed_in",
+///     encodedAs: String.self,
+///     encode: { DateFormatter.timestamp($0) },
+///     decode: { DateFormatter.date(from: $0) }
+/// )
+/// let lastSignedIn: Date
+/// ```
+///
+/// If `decode` returns `nil` for a non-optional
+/// property, the generated initializer throws. For
+/// optional properties, the property is set to `nil`.
+///
+/// - Parameters:
+///   - keyName: An optional custom key name used as the
+///     raw value of the generated `SerializableKey` case.
+///     When `nil`, the property name is used.
+///   - encodedAs: The metatype of the serialized
+///     representation (for example, `String.self`).
+///   - encode: A closure that converts from the property
+///     type to the serialized type.
+///   - decode: A closure that converts from the
+///     serialized type back to the property type,
+///     returning `nil` on failure.
+@attached(peer)
+public macro Serialized<Value, Encoded>(
+    _ keyName: String? = nil,
+    encodedAs: Encoded.Type,
+    encode: @escaping (Value) -> Encoded,
+    decode: @escaping (Encoded) -> Value?
 ) = #externalMacro(
     module: "NetworkingMacros",
     type: "SerializedMacro"

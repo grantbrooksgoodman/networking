@@ -13,9 +13,6 @@
 # Disabled
 --disable wrapMultilineStatementBraces
 
-# Excluded directories
---exclude Pods
-
 # Rules Options
 ## Unused Arguments (See https://github.com/nicklockwood/SwiftFormat/blob/master/Rules.md#unusedarguments)
 --stripunusedargs closure-only

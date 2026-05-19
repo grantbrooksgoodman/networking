@@ -80,7 +80,7 @@ public enum Networking {
     /// called.
     public static let config = Config.shared
 
-    private static let _didInitialize = LockIsolated<Bool>(wrappedValue: false)
+    private static let _didInitialize = LockIsolated(false)
 
     /* MARK: Computed Properties */
 
@@ -161,8 +161,8 @@ public extension Networking {
         @LockIsolated package private(set) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
         @LockIsolated package private(set) var storageDelegate: StorageDelegate = Storage()
 
-        private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(wrappedValue: nil)
-        private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(wrappedValue: nil)
+        private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(nil)
+        private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(nil)
 
         /* MARK: Computed Properties */
 
@@ -191,13 +191,7 @@ public extension Networking {
         /// To change the environment, call
         /// ``setEnvironment(_:)``.
         public var environment: NetworkEnvironment {
-            @Persistent(.networkEnvironment) var persistedValue: NetworkEnvironment?
-            guard let persistedValue else {
-                persistedValue = .production
-                return .production
-            }
-
-            return persistedValue
+            Persistent(.networkEnvironment).wrappedValue ?? .production
         }
 
         package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate? {

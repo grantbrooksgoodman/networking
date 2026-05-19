@@ -26,7 +26,8 @@ extension SerializableMacro {
 
         var checks = [String]()
         for property in nonOptionalProperties {
-            let typeName = strippingOptionalWrapper(from: property.propertyType)
+            let typeName = property.encodedTypeName
+                ?? strippingOptionalWrapper(from: property.propertyType)
             checks.append(
                 "data[SerializableKey.\(property.propertyName).rawValue] is \(typeName)"
             )
@@ -48,10 +49,7 @@ extension SerializableMacro {
         let optionalProperties = properties.filter(\.isOptional)
 
         if optionalProperties.isEmpty {
-            let entries = nonOptionalProperties.map {
-                "SerializableKey.\($0.propertyName).rawValue: \($0.propertyName)"
-            }
-
+            let entries = nonOptionalProperties.map { encodedEntry(for: $0) }
             let entryBody = entries.joined(separator: ",\n            ")
             return """
             var encoded: [String: Any] {
@@ -68,10 +66,7 @@ extension SerializableMacro {
         if nonOptionalProperties.isEmpty {
             lines.append("    var encoded = [String: Any]()")
         } else {
-            let entries = nonOptionalProperties.map {
-                "SerializableKey.\($0.propertyName).rawValue: \($0.propertyName)"
-            }
-
+            let entries = nonOptionalProperties.map { encodedEntry(for: $0) }
             let entryBody = entries.joined(separator: ",\n            ")
             lines.append("    var encoded: [String: Any] = [")
             lines.append("        \(entryBody),")
@@ -81,9 +76,13 @@ extension SerializableMacro {
         lines.append("")
 
         for property in optionalProperties {
+            let value = property.encodeExpression.map {
+                "(\($0))(\(property.propertyName))"
+            } ?? property.propertyName
+
             lines.append(
                 "    if let \(property.propertyName) " +
-                    "{ encoded[SerializableKey.\(property.propertyName).rawValue] = \(property.propertyName) }"
+                    "{ encoded[SerializableKey.\(property.propertyName).rawValue] = \(value) }"
             )
         }
 
@@ -101,9 +100,9 @@ extension SerializableMacro {
         let nonOptionalProperties = serializedProperties.filter { !$0.isOptional }
         let optionalProperties = serializedProperties.filter(\.isOptional)
 
-        // Build guard-let clauses for non-optional properties
+        // Guard-let clauses for non-optional properties without transforms
         var guardLetClauses = [String]()
-        for property in nonOptionalProperties {
+        for property in nonOptionalProperties where !property.hasTransform {
             let unwrappedTypeName = strippingOptionalWrapper(
                 from: property.propertyType
             )
@@ -114,17 +113,29 @@ extension SerializableMacro {
             )
         }
 
-        // Build let bindings for optional properties
+        // Two-step decode blocks for non-optional properties with transforms
+        let transformedNonOptional = nonOptionalProperties.filter(\.hasTransform)
+
+        // Let bindings for optional properties
         var optionalLetClauses = [String]()
         for property in optionalProperties {
-            let unwrappedTypeName = strippingOptionalWrapper(
-                from: property.propertyType
-            )
+            if let encodedTypeName = property.encodedTypeName,
+               let decodeExpression = property.decodeExpression {
+                optionalLetClauses.append(
+                    "let \(property.propertyName) = " +
+                        "(data[SerializableKey.\(property.propertyName).rawValue] as? \(encodedTypeName))" +
+                        ".flatMap(\(decodeExpression))"
+                )
+            } else {
+                let unwrappedTypeName = strippingOptionalWrapper(
+                    from: property.propertyType
+                )
 
-            optionalLetClauses.append(
-                "let \(property.propertyName) = " +
-                    "data[SerializableKey.\(property.propertyName).rawValue] as? \(unwrappedTypeName)"
-            )
+                optionalLetClauses.append(
+                    "let \(property.propertyName) = " +
+                        "data[SerializableKey.\(property.propertyName).rawValue] as? \(unwrappedTypeName)"
+                )
+            }
         }
 
         // Build init call using init parameter ordering and labels
@@ -157,14 +168,36 @@ extension SerializableMacro {
             lines.append("    }")
         }
 
+        for (index, property) in transformedNonOptional.enumerated() {
+            if !guardLetClauses.isEmpty || index > 0 {
+                lines.append("")
+            }
+
+            let unwrappedTypeName = strippingOptionalWrapper(
+                from: property.propertyType
+            )
+
+            lines.append("    guard let raw_\(property.propertyName) = data[SerializableKey.\(property.propertyName).rawValue] as? \(property.encodedTypeName!) else {")
+            lines.append("        throw .Networking.decodingFailed(data: data, .init(sender: Self.self))")
+            lines.append("    }")
+            lines.append("")
+            lines.append("    let decoded_\(property.propertyName): \(unwrappedTypeName)? = (\(property.decodeExpression!))(raw_\(property.propertyName))")
+            lines.append("    guard let \(property.propertyName) = decoded_\(property.propertyName) else {")
+            lines.append("        throw .Networking.decodingFailed(data: data, .init(sender: Self.self))")
+            lines.append("    }")
+        }
+
         if !optionalLetClauses.isEmpty {
-            if !guardLetClauses.isEmpty { lines.append("") }
+            if !guardLetClauses.isEmpty || !transformedNonOptional.isEmpty {
+                lines.append("")
+            }
+
             for clause in optionalLetClauses {
                 lines.append("    \(clause)")
             }
         }
 
-        if !guardLetClauses.isEmpty || !optionalLetClauses.isEmpty {
+        if !guardLetClauses.isEmpty || !transformedNonOptional.isEmpty || !optionalLetClauses.isEmpty {
             lines.append("")
         }
 
@@ -198,6 +231,16 @@ extension SerializableMacro {
     }
 
     // MARK: - Auxiliary
+
+    private static func encodedEntry(
+        for property: SerializedProperty
+    ) -> String {
+        let key = "SerializableKey.\(property.propertyName).rawValue"
+        if let encodeExpr = property.encodeExpression {
+            return "\(key): (\(encodeExpr))(\(property.propertyName))"
+        }
+        return "\(key): \(property.propertyName)"
+    }
 
     private static func strippingOptionalWrapper(
         from type: TypeSyntax

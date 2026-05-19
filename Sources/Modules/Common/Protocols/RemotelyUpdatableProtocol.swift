@@ -114,6 +114,12 @@ public protocol RemotelyUpdatable: Serializable {
     /// `NetworkPath("documents")`, and a write to the
     /// `revision` key produces the path
     /// `"documents/<identifier>/revision"`.
+    ///
+    /// The default implementation derives the path by
+    /// lowercasing the type name and appending `"s"` – for
+    /// example, `User` produces `NetworkPath("users")`.
+    /// Override this property when the backend path does
+    /// not follow that convention.
     var networkPath: NetworkPath { get }
 
     /// Whether `database.setValue` prepends the current
@@ -193,8 +199,8 @@ public protocol RemotelyUpdatable: Serializable {
     func willWrite(
         _ value: Any,
         forKey key: SerializableKey,
-        updating updated: Self // swiftformat:disable all
-    ) async throws(Exception) -> WriteAction<Self> // swiftformat:enable all
+        updating updated: Self
+    ) async throws(Exception) -> WriteAction<Self>
 
     /// Called after a successful database write to perform
     /// any post-update side effects.
@@ -214,14 +220,23 @@ public protocol RemotelyUpdatable: Serializable {
     ///   fails.
     func didWrite(
         _ updated: Self,
-        forKey key: SerializableKey // swiftformat:disable all
-    ) async throws(Exception) -> Self // swiftformat:enable all
+        forKey key: SerializableKey
+    ) async throws(Exception) -> Self
 }
 
 public extension RemotelyUpdatable {
     // MARK: - Properties
 
-    var networkPathPrependsCurrentEnvironment: Bool { true }
+    var networkPath: NetworkPath {
+        NetworkPath(
+            String(describing: Self.self)
+                .lowercased() + "s"
+        )
+    }
+
+    var networkPathPrependsCurrentEnvironment: Bool {
+        true
+    }
 
     // MARK: - Methods
 
@@ -262,8 +277,8 @@ public extension RemotelyUpdatable {
     ///   underlying write fails.
     func update<Value>(
         _ keyPath: KeyPath<Self, Value>,
-        to value: Value // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
+        to value: Value
+    ) async throws(Exception) -> Self {
         guard let key = Self.serializableKey(for: keyPath) else {
             throw .Networking.notRemotelyUpdatable(
                 key: keyPath,
@@ -280,15 +295,15 @@ public extension RemotelyUpdatable {
     func willWrite(
         _ value: Any,
         forKey key: SerializableKey,
-        updating updated: Self // swiftformat:disable all
-    ) async throws(Exception) -> WriteAction<Self> { // swiftformat:enable all
+        updating updated: Self
+    ) async throws(Exception) -> WriteAction<Self> {
         .proceed
     }
 
     func didWrite(
         _ updated: Self,
-        forKey key: SerializableKey // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
+        forKey key: SerializableKey
+    ) async throws(Exception) -> Self {
         updated
     }
 }
@@ -326,8 +341,8 @@ extension RemotelyUpdatable where Representation == [String: Any] {
     ///   value's type does not match the property, or
     ///   if the database write fails.
     public func update(
-        @AssignBuilder<Self> _ build: sending() -> [Assign<Self>] // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
+        @AssignBuilder<Self> _ build: sending () -> [Assign<Self>]
+    ) async throws(Exception) -> Self {
         var data: [PartialKeyPath<Self>: Any] = [:]
         for assignment in build() {
             data[assignment.keyPath] = assignment.value
@@ -336,8 +351,8 @@ extension RemotelyUpdatable where Representation == [String: Any] {
     }
 
     func updateValues(
-        with data: [PartialKeyPath<Self>: Any] // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
+        with data: [PartialKeyPath<Self>: Any]
+    ) async throws(Exception) -> Self {
         @Dependency(\.networking.database) var database: DatabaseDelegate
 
         var updated = self
@@ -386,8 +401,8 @@ extension RemotelyUpdatable where Representation == [String: Any] {
 extension RemotelyUpdatable {
     func updateValue(
         writing value: Any,
-        forKey key: SerializableKey // swiftformat:disable all
-    ) async throws(Exception) -> Self { // swiftformat:enable all
+        forKey key: SerializableKey
+    ) async throws(Exception) -> Self {
         @Dependency(\.networking.database) var database: DatabaseDelegate
 
         guard let newValue = modifyKey(
@@ -436,8 +451,10 @@ extension RemotelyUpdatable {
                 ) {
                     throw exception
                 }
-            } else if let serializable = value as? [any Serializable] { // swiftformat:disable all
-                let encoded = serializable.map { $0.encoded } // swiftformat:enable all
+            } else if let serializable = value as? [any Serializable] {
+                // swiftformat:disable all
+                let encoded = serializable.map { $0.encoded }
+                // swiftformat:enable all
                 if let exception = await database.setValue(
                     encoded.isEmpty ? Array.bangQualifiedEmpty : encoded,
                     forKey: valueKeyPath,

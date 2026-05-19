@@ -26,6 +26,9 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
   - [Gemini](#gemini)
   - [Storage](#storage)
   - [Translation](#translation)
+- [Performance](#performance)
+  - [Connection Prewarming](#connection-prewarming)
+  - [Operation Coalescing](#operation-coalescing)
 - [Delegate Customization](#delegate-customization)
 - [Dependencies](#dependencies)
 
@@ -241,7 +244,32 @@ To use a key name that differs from the property name, pass it as a string argum
 @Serialized("fromAccount") let fromAccountID: String
 ```
 
-The generated conformance uses `[String: Any]` as its `Representation` and supports properties whose types can be extracted from a dictionary using `as?` – typically `String`, `Int`, `Bool`, `Double`, and arrays or optionals thereof. For types that require custom transforms, dependency injection, or nested `Serializable` decoding, write the conformance manually:
+The generated conformance uses `[String: Any]` as its `Representation` and supports properties whose types can be extracted from a dictionary using `as?` – typically `String`, `Int`, `Bool`, `Double`, and arrays or optionals thereof.
+
+When a property's Swift type differs from its serialized representation, pass `encodedAs`, `encode`, and `decode` parameters to `@Serialized` to supply a custom transform:
+
+```swift
+@Serialized(
+    encodedAs: String.self,
+    encode: { DateFormatter.timestamp($0) },
+    decode: { DateFormatter.date(from: $0) }
+)
+let lastSignedIn: Date
+```
+
+The `encode` closure converts from the property type to the serialized type, and the `decode` closure converts back, returning `nil` on failure. If `decode` returns `nil` for a non-optional property, the generated `init(from:)` throws; for optional properties, the property is set to `nil`. The `encodedAs` parameter tells the macro what type to expect when reading from the dictionary. Custom key names can be combined with transforms by passing both:
+
+```swift
+@Serialized(
+    "signed_in",
+    encodedAs: String.self,
+    encode: { DateFormatter.timestamp($0) },
+    decode: { DateFormatter.date(from: $0) }
+)
+let lastSignedIn: Date
+```
+
+For types that require dependency injection or nested `Serializable` decoding, write the conformance manually:
 
 ```swift
 extension Activity: Serializable {
@@ -324,7 +352,7 @@ Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed
 | Requirement | Purpose |
 |---|---|
 | `identifier` | The identifier string used to construct the full database key path. |
-| `networkPath` | The base path for records of this type (for example, `"documents"`). |
+| `networkPath` | The base path for records of this type (for example, `"documents"`). The default lowercases the type name and appends `"s"`. |
 | `modifyKey(_:withValue:)` | Returns a modified in-memory copy with the specified key set to the new value, or `nil` on type mismatch. |
 | `serializableKey(for:)` | Maps a key path to its serialization key. Required for `update(_:to:)`. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
 
@@ -355,28 +383,25 @@ struct Document {
 
 `@Serializable` generates the serialization boilerplate. `@RemotelyUpdatable` generates `copying(paramName:)` methods, `modifyKey(_:withValue:)`, and `serializableKey(for:)`. The two macros are independent – if you wrote your `Serializable` conformance manually, apply `@RemotelyUpdatable` on its own.
 
-Then declare a `NetworkPath` for the type and provide the two remaining protocol requirements – `identifier` and `networkPath`:
+Then declare the `RemotelyUpdatable` conformance. The `identifier` property is already declared on `Document`, so the compiler satisfies that requirement automatically. The default `networkPath` lowercases the type name and appends `"s"`, so `Document` produces `NetworkPath("documents")`.
 
-```swift
-extension NetworkPath {
-    static let documents = NetworkPath("documents")
-}
-
-extension Document: RemotelyUpdatable {
-    var networkPath: NetworkPath { .documents }
-}
-```
-
-The `identifier` property is already declared on `Document`, so the compiler satisfies the requirement automatically. If your model uses a different property name (for example, `id`), provide a computed property in the extension:
+If your model uses a different property name for its identifier (for example, `id`), provide a computed property:
 
 ```swift
 extension Document: RemotelyUpdatable {
     var identifier: String { id }
-    var networkPath: NetworkPath { .documents }
 }
 ```
 
-With a `NetworkPath` declared, the hard-coded path strings from earlier can use it as well:
+When the backend path does not follow the naming convention, override `networkPath`:
+
+```swift
+extension Document: RemotelyUpdatable {
+    var networkPath: NetworkPath { NetworkPath("docs") }
+}
+```
+
+You can also declare reusable `NetworkPath` constants as static properties for direct database access. With a constant declared, the hard-coded path strings from earlier can use it as well:
 
 ```swift
 let data: [String: Any] = try await database.getValues(
@@ -411,11 +436,11 @@ func willWrite(
 | Macro | Purpose |
 |---|---|
 | [`@Serializable`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Generates a complete `Serializable` conformance – `SerializableKey` enum, `encoded`, `canDecode(from:)`, and `init(from:)` – from `@Serialized` property markers. |
-| [`@Serialized`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Marks a stored property for inclusion in the generated `Serializable` conformance. Accepts an optional custom key name. |
+| [`@Serialized`](Sources/Modules/Common/Models/Public/Macros/SerializableMacro.swift) | Marks a stored property for inclusion in the generated `Serializable` conformance. Accepts an optional custom key name and optional encode/decode transforms. |
 | [`@RemotelyUpdatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Generates `copying(paramName:)` methods for each initializer parameter, and optionally `modifyKey(_:withValue:)` and `serializableKey(for:)` when `@Updatable` markers are present. |
 | [`@Updatable`](Sources/Modules/Common/Models/Public/Macros/RemotelyUpdatableMacro.swift) | Marks a stored property as a remotely updatable serialization key. Generates no code on its own – serves as a marker for `@RemotelyUpdatable`. |
 
-**`@Serializable`** reads the type's first initializer and generates a complete `Serializable` conformance from the `@Serialized` property markers. Each `@Serialized` property must have a corresponding initializer parameter with the same name. Properties without the annotation are excluded from serialization. The generated conformance uses `[String: Any]` as its `Representation` and supports types that can be extracted with `as?`. For complex types that need custom transforms, nested decoding, or dependency injection, write the conformance manually instead.
+**`@Serializable`** reads the type's first initializer and generates a complete `Serializable` conformance from the `@Serialized` property markers. Each `@Serialized` property must have a corresponding initializer parameter with the same name. Properties without the annotation are excluded from serialization. The generated conformance uses `[String: Any]` as its `Representation` and supports types that can be extracted with `as?`. Properties that need custom encoding or decoding can supply transforms through `@Serialized(encodedAs:encode:decode:)` instead of writing the conformance manually. For types that need dependency injection or nested `Serializable` decoding, write the conformance manually.
 
 **`@RemotelyUpdatable`** reads the type's first initializer to determine parameter names, labels, and types. If the type declares more than one initializer, the macro emits a warning and uses the first. It generates a `copying(paramName:)` method for each parameter, returning a new instance with that single property replaced and all others preserved:
 
@@ -577,6 +602,30 @@ let translateResult = await translator.translate(
 Translations can be serialized for database storage using [`TranslationReference`](Sources/Modules/Translation/Models/Public/TranslationReference.swift), a compact codable form that can later be decoded back into a full translation – either from an inline value, the local archive, or the hosted archive.
 
 Use [`TranslationValidator`](Sources/Modules/Translation/Models/Public/TranslationValidator.swift) to check that inputs and language pairs are well-formed before passing them to the translation service.
+
+---
+
+## Performance
+
+### Connection Prewarming
+
+On a cold start, the first database or storage operation may incur additional latency while the underlying connection to the backend is established. Both [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) and [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) provide a `prewarm()` method that begins connection setup in the background:
+
+```swift
+@Dependency(\.networking.database) var database: DatabaseDelegate
+@Dependency(\.networking.storage) var storage: StorageDelegate
+
+database.prewarm()
+storage.prewarm()
+```
+
+Both calls return immediately. Connection establishment proceeds in the background.
+
+### Operation Coalescing
+
+The default database and storage implementations automatically coalesce identical concurrent operations. When multiple callers perform the same operation at the same time, only a single network request is made and all callers receive the same result. Two operations are considered identical when they share the same parameters – including path, cache strategy, and, for write operations, payload.
+
+This deduplication is transparent and requires no additional configuration.
 
 ---
 

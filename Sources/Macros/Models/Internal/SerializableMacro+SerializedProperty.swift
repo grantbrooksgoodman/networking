@@ -17,19 +17,34 @@ extension SerializableMacro {
         /* MARK: Properties */
 
         let customKeyName: String?
+        let decodeExpression: String?
+        let encodeExpression: String?
+        let encodedTypeName: String?
         let isOptional: Bool
         let propertyName: String
         let propertyType: TypeSyntax
+
+        /* MARK: Computed Properties */
+
+        var hasTransform: Bool {
+            encodedTypeName != nil
+        }
 
         /* MARK: Init */
 
         init(
             customKeyName: String?,
+            decodeExpression: String? = nil,
+            encodeExpression: String? = nil,
+            encodedTypeName: String? = nil,
             isOptional: Bool,
             propertyName: String,
             propertyType: TypeSyntax
         ) {
             self.customKeyName = customKeyName
+            self.decodeExpression = decodeExpression
+            self.encodeExpression = encodeExpression
+            self.encodedTypeName = encodedTypeName
             self.isOptional = isOptional
             self.propertyName = propertyName
             self.propertyType = propertyType
@@ -66,8 +81,12 @@ extension SerializableMacro {
             let isOptional = propertyType.is(OptionalTypeSyntax.self) ||
                 (propertyType.as(IdentifierTypeSyntax.self)?.name.text == "Optional")
 
+            let transformInfo = extractTransformInfo(from: variableDeclaration)
             properties.append(SerializedProperty(
                 customKeyName: extractCustomKeyName(from: variableDeclaration),
+                decodeExpression: transformInfo?.decodeExpression,
+                encodeExpression: transformInfo?.encodeExpression,
+                encodedTypeName: transformInfo?.encodedTypeName,
                 isOptional: isOptional,
                 propertyName: pattern.identifier.text,
                 propertyType: propertyType
@@ -96,6 +115,52 @@ extension SerializableMacro {
                   .first?
                   .as(StringSegmentSyntax.self) else { continue }
             return segment.content.text
+        }
+
+        return nil
+    }
+
+    private static func extractTransformInfo(
+        from variableDeclaration: VariableDeclSyntax
+    ) -> (encodedTypeName: String, encodeExpression: String, decodeExpression: String)? {
+        for attribute in variableDeclaration.attributes {
+            guard case let .attribute(attributeSyntax) = attribute,
+                  attributeSyntax.attributeName.trimmedDescription == "Serialized",
+                  let arguments = attributeSyntax.arguments,
+                  case let .argumentList(argumentList) = arguments else { continue }
+
+            var decodeExpression: String?
+            var encodeExpression: String?
+            var encodedTypeName: String?
+
+            for argument in argumentList {
+                switch argument.label?.text {
+                case "decode":
+                    decodeExpression = argument.expression.trimmedDescription
+
+                case "encode":
+                    encodeExpression = argument.expression.trimmedDescription
+
+                case "encodedAs":
+                    let text = argument.expression.trimmedDescription
+                    encodedTypeName = text.hasSuffix(".self")
+                        ? String(text.dropLast(5))
+                        : text
+
+                default:
+                    break
+                }
+            }
+
+            if let decodeExpression,
+               let encodeExpression,
+               let encodedTypeName {
+                return (
+                    encodedTypeName,
+                    encodeExpression,
+                    decodeExpression
+                )
+            }
         }
 
         return nil

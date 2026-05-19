@@ -22,6 +22,12 @@ struct Storage: StorageDelegate {
         coreStorage.setGlobalCacheStrategy(globalCacheStrategy)
     }
 
+    // MARK: - Prewarming
+
+    func prewarm() {
+        coreStorage.prewarm()
+    }
+
     // MARK: - Data Upload
 
     func upload(
@@ -30,20 +36,16 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .upload(
-                    data,
-                    metadata: metadata
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreStorage.performOperation(
+            .upload(
+                data,
+                metadata: metadata
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -55,20 +57,16 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .deleteAllItems(
-                    atPath: path,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreStorage.performOperation(
+            .deleteAllItems(
+                atPath: path,
+                includeItemsInSubdirectories: includeItemsInSubdirectories
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -77,19 +75,15 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .deleteItem(
-                    atPath: path
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreStorage.performOperation(
+            .deleteItem(
+                atPath: path
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -104,22 +98,18 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .downloadAllItems(
-                    atPath: path,
-                    toDirectory: localDirectory,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories,
-                    cacheStrategy: cacheStrategy
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreStorage.performOperation(
+            .downloadAllItems(
+                atPath: path,
+                toDirectory: localDirectory,
+                includeItemsInSubdirectories: includeItemsInSubdirectories,
+                cacheStrategy: cacheStrategy
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -130,21 +120,17 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .downloadItem(
-                    atPath: path,
-                    toLocalPath: localPath,
-                    cacheStrategy: cacheStrategy
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreStorage.performOperation(
+            .downloadItem(
+                atPath: path,
+                toLocalPath: localPath,
+                cacheStrategy: cacheStrategy
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -155,28 +141,24 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Callback<Set<String>, Exception> {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .enumerateEmptyDirectories(
-                    startingAt: path
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(emptyDirectories):
-                    guard let emptyDirectories = emptyDirectories as? Set<String> else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(emptyDirectories))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreStorage.performOperation(
+            .enumerateEmptyDirectories(
+                startingAt: path
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(emptyDirectories):
+            guard let emptyDirectories = emptyDirectories as? Set<String> else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(emptyDirectories)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 
@@ -186,29 +168,25 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Callback<DirectoryListing, Exception> {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .getDirectoryListing(
-                    atPath: path,
-                    firstResultOnly: firstResultOnly
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(directoryListing):
-                    guard let directoryListing = directoryListing as? DirectoryListing else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(directoryListing))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreStorage.performOperation(
+            .getDirectoryListing(
+                atPath: path,
+                firstResultOnly: firstResultOnly
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(directoryListing):
+            guard let directoryListing = directoryListing as? DirectoryListing else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(directoryListing)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 
@@ -219,30 +197,26 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Bool, Exception> {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .itemExists(
-                    asItemType: itemType,
-                    atPath: path,
-                    cacheStrategy: cacheStrategy
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(itemExists):
-                    guard let itemExists = itemExists as? Bool else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(itemExists))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreStorage.performOperation(
+            .itemExists(
+                asItemType: itemType,
+                atPath: path,
+                cacheStrategy: cacheStrategy
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(itemExists):
+            guard let itemExists = itemExists as? Bool else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(itemExists)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 
@@ -251,26 +225,22 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Callback<Int, Exception> {
-        await withCheckedContinuation { continuation in
-            coreStorage.performOperation(
-                .sizeInKilobytes(ofItemAtPath: path),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(sizeInKilobytes):
-                    guard let sizeInKilobytes = sizeInKilobytes as? Int else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(sizeInKilobytes))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreStorage.performOperation(
+            .sizeInKilobytes(ofItemAtPath: path),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(sizeInKilobytes):
+            guard let sizeInKilobytes = sizeInKilobytes as? Int else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(sizeInKilobytes)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 

@@ -149,7 +149,9 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(wrappedValue: nil)
+    private static let coalescer = KeyedCoalescer<String, Callback<Any?, Exception>>()
+
+    private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(nil)
 
     // MARK: - Computed Properties
 
@@ -170,6 +172,20 @@ final class CoreDatabase: @unchecked Sendable {
 
     func setGlobalCacheStrategy(_ globalCacheStrategy: CacheStrategy?) {
         self.globalCacheStrategy = globalCacheStrategy
+    }
+
+    // MARK: - Prewarming
+
+    func prewarm() {
+        Logger.log(
+            "Prewarming database connection.",
+            domain: .Networking.database,
+            sender: self
+        )
+
+        firebaseDatabase
+            .child(".info/connected")
+            .observeSingleEvent(of: .value) { _ in }
     }
 
     // MARK: - Data Integrity Validation
@@ -223,6 +239,40 @@ final class CoreDatabase: @unchecked Sendable {
     // MARK: - Perform Operation
 
     func performOperation(
+        _ operation: DatabaseOperation,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async -> Callback<Any?, Exception> {
+        await Self.coalescer(
+            String.fromCurrentEditorContext(
+                sender: self
+            ) + "/" + (
+                operation.encodedHash
+                    + (globalCacheStrategy?.rawValue ?? "")
+                    + prependingEnvironment.description
+                    + duration.description
+            ).encodedHash
+        ) { [weak self] in
+            guard let self else {
+                return .failure(.init(
+                    "Service has been deallocated.",
+                    metadata: .init(sender: Self.self)
+                ))
+            }
+
+            return await withCheckedContinuation { continuation in
+                self._performOperation(
+                    operation,
+                    prependingEnvironment: prependingEnvironment,
+                    timeout: duration
+                ) { callback in
+                    continuation.resume(returning: callback)
+                }
+            }
+        }
+    }
+
+    private func _performOperation(
         _ operation: DatabaseOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration,
@@ -299,7 +349,9 @@ final class CoreDatabase: @unchecked Sendable {
         at path: String,
         cacheStrategy: CacheStrategy
     ) async -> Callback<Any?, Exception> {
-        var cachedValue: Any? { CoreDatabaseStore.getValue(forKey: path) }
+        var cachedValue: Any? {
+            CoreDatabaseStore.getValue(forKey: path)
+        }
 
         if cacheStrategy == .returnCacheFirst,
            let cachedValue {
@@ -376,7 +428,9 @@ final class CoreDatabase: @unchecked Sendable {
         strategy: QueryStrategy,
         cacheStrategy: CacheStrategy
     ) async -> Callback<Any?, Exception> {
-        var cachedValue: Any? { CoreDatabaseStore.getValue(forKey: path) }
+        var cachedValue: Any? {
+            CoreDatabaseStore.getValue(forKey: path)
+        }
 
         if cacheStrategy == .returnCacheFirst,
            let cachedValue {
@@ -462,7 +516,10 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        if let exception = await _setValue(value, forKey: key) {
+        if let exception = await _setValue(
+            value,
+            forKey: key
+        ) {
             return .failure(exception)
         }
 
@@ -538,7 +595,9 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Auxiliary
 
-    private func isEmpty(_ value: Any?) -> Bool { value is NSNull }
+    private func isEmpty(_ value: Any?) -> Bool {
+        value is NSNull
+    }
 }
 
 // swiftlint:enable file_length type_body_length

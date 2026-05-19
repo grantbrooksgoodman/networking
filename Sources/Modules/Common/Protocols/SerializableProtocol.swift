@@ -83,6 +83,6 @@ public protocol Serializable {
     ///
     /// - Throws: An `Exception` if decoding fails.
     init(
-        from data: Representation // swiftformat:disable all
-    ) async throws(Exception) // swiftformat:enable all
+        from data: Representation
+    ) async throws(Exception)
 }

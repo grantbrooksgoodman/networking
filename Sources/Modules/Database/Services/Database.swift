@@ -34,14 +34,20 @@ struct Database: DatabaseDelegate {
         coreDatabase.setGlobalCacheStrategy(globalCacheStrategy)
     }
 
+    // MARK: - Prewarming
+
+    func prewarm() {
+        coreDatabase.prewarm()
+    }
+
     // MARK: - Value Retrieval
 
     func getValues<T>(
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration // swiftformat:disable all
-    ) async throws(Exception) -> T { // swiftformat:enable all
+        timeout duration: Duration
+    ) async throws(Exception) -> T {
         let getValuesResult = await getValues(
             at: path,
             prependingEnvironment: prependingEnvironment,
@@ -71,29 +77,25 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Any, Exception> {
-        await withCheckedContinuation { continuation in
-            coreDatabase.performOperation(
-                .getValues(
-                    atPath: path,
-                    cacheStrategy: cacheStrategy
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(values):
-                    guard let values else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(values))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreDatabase.performOperation(
+            .getValues(
+                atPath: path,
+                cacheStrategy: cacheStrategy
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(values):
+            guard let values else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(values)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 
@@ -135,30 +137,26 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async -> Callback<Any, Exception> {
-        await withCheckedContinuation { continuation in
-            coreDatabase.performOperation(
-                .queryValues(
-                    atPath: path,
-                    strategy: strategy,
-                    cacheStrategy: cacheStrategy
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case let .success(values):
-                    guard let values else {
-                        return continuation.resume(returning: .failure(
-                            .init(metadata: .init(sender: self))
-                        ))
-                    }
-
-                    continuation.resume(returning: .success(values))
-
-                case let .failure(exception):
-                    continuation.resume(returning: .failure(exception))
-                }
+        switch await coreDatabase.performOperation(
+            .queryValues(
+                atPath: path,
+                strategy: strategy,
+                cacheStrategy: cacheStrategy
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case let .success(values):
+            guard let values else {
+                return .failure(.init(
+                    metadata: .init(sender: self)
+                ))
             }
+
+            return .success(values)
+
+        case let .failure(exception):
+            return .failure(exception)
         }
     }
 
@@ -170,20 +168,16 @@ struct Database: DatabaseDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreDatabase.performOperation(
-                .setValue(
-                    value,
-                    forKey: key
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreDatabase.performOperation(
+            .setValue(
+                value,
+                forKey: key
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 
@@ -193,20 +187,16 @@ struct Database: DatabaseDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async -> Exception? {
-        await withCheckedContinuation { continuation in
-            coreDatabase.performOperation(
-                .updateChildValues(
-                    forKey: key,
-                    withData: data
-                ),
-                prependingEnvironment: prependingEnvironment,
-                timeout: duration
-            ) { callback in
-                switch callback {
-                case .success: continuation.resume(returning: nil)
-                case let .failure(exception): continuation.resume(returning: exception)
-                }
-            }
+        switch await coreDatabase.performOperation(
+            .updateChildValues(
+                forKey: key,
+                withData: data
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        ) {
+        case .success: nil
+        case let .failure(exception): exception
         }
     }
 }

@@ -23,14 +23,18 @@ extension Translation: Serializable {
     // MARK: - Properties
 
     /// The serialized representation of this translation.
-    public var encoded: TranslationReference { .init(self) }
+    public var encoded: TranslationReference {
+        .init(self)
+    }
 
     // MARK: - Methods
 
     /// Returns `true` for all translation references,
     /// because validity is determined during decoding
     /// rather than upfront inspection.
-    public static func canDecode(from data: TranslationReference) -> Bool { true }
+    public static func canDecode(from data: TranslationReference) -> Bool {
+        true
+    }
 
     /// Creates a translation by decoding from the
     /// specified reference.
@@ -56,8 +60,8 @@ extension Translation: Serializable {
     ///
     /// - Throws: An `Exception` if decoding fails.
     public init(
-        from data: TranslationReference // swiftformat:disable all
-    ) async throws(Exception) { // swiftformat:enable all
+        from data: TranslationReference
+    ) async throws(Exception) {
         @Dependency(\.translationArchiverDelegate) var localTranslationArchiver: TranslationArchiverDelegate
 
         func addToArchive(_ translation: Translation) {
