@@ -98,7 +98,7 @@ extension Translation: Serializable {
                 return
             }
 
-            let findArchivedTranslationResult = await Networking
+            let translation = try await Networking
                 .config
                 .hostedTranslationDelegate
                 .findArchivedTranslation(
@@ -106,14 +106,8 @@ extension Translation: Serializable {
                     languagePair: data.languagePair
                 )
 
-            switch findArchivedTranslationResult {
-            case let .success(translation):
-                addToArchive(translation)
-                self = translation
-
-            case let .failure(exception):
-                throw exception
-            }
+            addToArchive(translation)
+            self = translation
 
         case let .idempotent(encodedValue):
             let decoded: Translation = .init(

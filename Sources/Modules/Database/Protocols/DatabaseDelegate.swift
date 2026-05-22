@@ -28,7 +28,7 @@ import AppSubsystem
 /// )
 ///
 /// // Write a value.
-/// let exception = await database.setValue(
+/// try await database.setValue(
 ///     "Jane",
 ///     forKey: "users/123/name"
 /// )
@@ -168,14 +168,13 @@ public protocol DatabaseDelegate {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the write fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the write fails.
     func setValue(
         _ value: Any,
         forKey key: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 
     /// Updates specific child values at the specified
     /// key without overwriting sibling data.
@@ -196,14 +195,13 @@ public protocol DatabaseDelegate {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the update fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the update fails.
     func updateChildValues(
         forKey key: String,
         with data: [String: Any],
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 }
 
 public extension DatabaseDelegate {
@@ -305,15 +303,14 @@ public extension DatabaseDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the write fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the write fails.
     func setValue(
         _ value: Any,
         forKey key: String,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await setValue(
+    ) async throws(Exception) {
+        try await setValue(
             value,
             forKey: key,
             prependingEnvironment: prependingEnvironment,
@@ -340,15 +337,14 @@ public extension DatabaseDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the update fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the update fails.
     func updateChildValues(
         forKey key: String,
         with data: [String: Any],
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await updateChildValues(
+    ) async throws(Exception) {
+        try await updateChildValues(
             forKey: key,
             with: data,
             prependingEnvironment: prependingEnvironment,

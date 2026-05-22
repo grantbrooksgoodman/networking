@@ -23,7 +23,7 @@ import Translator
 /// ```swift
 /// @Dependency(\.networking.hostedTranslation) var translator: HostedTranslationDelegate
 ///
-/// let translateResult = await translator.translate(
+/// let translation = try await translator.translate(
 ///     .init("Hello"),
 ///     with: LanguagePair(from: "en", to: "es")
 /// )
@@ -48,11 +48,14 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
     ///   - languagePair: The language pair for the
     ///     translation.
     ///
-    /// - Returns: On success, the archived translation.
+    /// - Returns: The archived translation.
+    ///
+    /// - Throws: An ``Exception`` if the translation
+    ///   cannot be found.
     func findArchivedTranslation(
         id inputValueEncodedHash: String,
         languagePair: LanguagePair
-    ) async -> Callback<Translation, Exception>
+    ) async throws(Exception) -> Translation
 
     /// Translates multiple inputs for the specified
     /// language pair.
@@ -67,14 +70,17 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
     ///   - enhancementConfig: An optional configuration
     ///     for AI-enhanced translation.
     ///
-    /// - Returns: On success, an array of translations
-    ///   corresponding to the inputs.
+    /// - Returns: An array of translations corresponding
+    ///   to the inputs.
+    ///
+    /// - Throws: An ``Exception`` if the translation
+    ///   fails.
     func getTranslations(
         for inputs: [TranslationInput],
         languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
         enhance enhancementConfig: EnhancementConfiguration?
-    ) async -> Callback<[Translation], Exception>
+    ) async throws(Exception) -> [Translation]
 
     /// Resolves a set of translatable label strings and
     /// returns their output maps.
@@ -85,9 +91,13 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
     /// - Parameter strings: The `TranslatedLabelStrings`
     ///   type to resolve.
     ///
-    /// - Returns: On success, an array of translation
-    ///   output maps.
-    func resolve(_ strings: TranslatedLabelStrings.Type) async -> Callback<[TranslationOutputMap], Exception>
+    /// - Returns: An array of translation output maps.
+    ///
+    /// - Throws: An ``Exception`` if the resolution
+    ///   fails.
+    func resolve(
+        _ strings: TranslatedLabelStrings.Type
+    ) async throws(Exception) -> [TranslationOutputMap]
 
     /// Translates a single input for the specified
     /// language pair.
@@ -102,13 +112,16 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
     ///   - enhancementConfig: An optional configuration
     ///     for AI-enhanced translation.
     ///
-    /// - Returns: On success, the translated value.
+    /// - Returns: The translated value.
+    ///
+    /// - Throws: An ``Exception`` if the translation
+    ///   fails.
     func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
         enhance enhancementConfig: EnhancementConfiguration?
-    ) async -> Callback<Translation, Exception>
+    ) async throws(Exception) -> Translation
 }
 
 public extension HostedTranslationDelegate {
@@ -129,15 +142,18 @@ public extension HostedTranslationDelegate {
     ///     for AI-enhanced translation. The default is
     ///     `nil`.
     ///
-    /// - Returns: On success, an array of translations
-    ///   corresponding to the inputs.
+    /// - Returns: An array of translations corresponding
+    ///   to the inputs.
+    ///
+    /// - Throws: An ``Exception`` if the translation
+    ///   fails.
     func getTranslations(
         for inputs: [TranslationInput],
         languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil,
         enhance enhancementConfig: EnhancementConfiguration? = nil
-    ) async -> Callback<[Translation], Exception> {
-        await getTranslations(
+    ) async throws(Exception) -> [Translation] {
+        try await getTranslations(
             for: inputs,
             languagePair: languagePair,
             hud: hudConfig,
@@ -162,14 +178,17 @@ public extension HostedTranslationDelegate {
     ///     for AI-enhanced translation. The default is
     ///     `nil`.
     ///
-    /// - Returns: On success, the translated value.
+    /// - Returns: The translated value.
+    ///
+    /// - Throws: An ``Exception`` if the translation
+    ///   fails.
     func translate(
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil,
         enhance enhancementConfig: EnhancementConfiguration? = nil
-    ) async -> Callback<Translation, Exception> {
-        await translate(
+    ) async throws(Exception) -> Translation {
+        try await translate(
             input,
             with: languagePair,
             hud: hudConfig,

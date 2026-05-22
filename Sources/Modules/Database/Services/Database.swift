@@ -167,18 +167,15 @@ struct Database: DatabaseDelegate {
         forKey key: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception? {
-        switch await coreDatabase.performOperation(
+    ) async throws(Exception) {
+        _ = try await coreDatabase.performOperation(
             .setValue(
                 value,
                 forKey: key
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case .success: nil
-        case let .failure(exception): exception
-        }
+        ).get()
     }
 
     func updateChildValues(
@@ -186,18 +183,15 @@ struct Database: DatabaseDelegate {
         with data: [String: Any],
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception? {
-        switch await coreDatabase.performOperation(
+    ) async throws(Exception) {
+        _ = try await coreDatabase.performOperation(
             .updateChildValues(
                 forKey: key,
                 withData: data
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case .success: nil
-        case let .failure(exception): exception
-        }
+        ).get()
     }
 }
 

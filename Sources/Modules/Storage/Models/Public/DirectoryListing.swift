@@ -20,18 +20,12 @@ import FirebaseStorage
 /// storage path:
 ///
 /// ```swift
-/// let getDirectoryListingResult = await storage.getDirectoryListing(
+/// let directoryListing = try await storage.getDirectoryListing(
 ///     at: "images"
 /// )
 ///
-/// switch getDirectoryListingResult {
-/// case let .success(directoryListing):
-///     print(listing.filePaths)
-///     print(listing.subdirectories)
-///
-/// case let .failure(exception):
-///     // Handle failure.
-/// }
+/// print(directoryListing.filePaths)
+/// print(directoryListing.subdirectories)
 /// ```
 public struct DirectoryListing: Sendable {
     // MARK: - Properties

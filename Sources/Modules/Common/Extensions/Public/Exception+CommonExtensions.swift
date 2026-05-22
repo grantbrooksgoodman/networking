@@ -19,11 +19,9 @@ import AppSubsystem
 /// networking error conditions:
 ///
 /// ```swift
-/// return .failure(
-///     .Networking.decodingFailed(
-///         data: rawData,
-///         .init(sender: self)
-///     )
+/// throw .Networking.decodingFailed(
+///     data: rawData,
+///     .init(sender: self)
 /// )
 /// ```
 public extension Exception {

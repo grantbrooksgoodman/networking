@@ -50,7 +50,7 @@ import FirebaseCore
 /// ```swift
 /// @Dependency(\.networking) var networking: NetworkServices
 ///
-/// let getValuesResult = await networking.database.getValues(
+/// let values: [String: Any] = try await networking.database.getValues(
 ///     at: "users/123"
 /// )
 /// ```

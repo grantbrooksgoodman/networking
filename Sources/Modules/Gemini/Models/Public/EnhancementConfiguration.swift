@@ -21,7 +21,7 @@ import Foundation
 ///     additionalContext: "Medical terminology"
 /// )
 ///
-/// let translateResult = await hostedTranslation.translate(
+/// let translation = try await hostedTranslation.translate(
 ///     input,
 ///     with: languagePair,
 ///     enhance: config

@@ -23,13 +23,13 @@ import AppSubsystem
 /// @Dependency(\.networking.storage) var storage: StorageDelegate
 ///
 /// // Upload data.
-/// let uploadException = await storage.upload(
+/// try await storage.upload(
 ///     imageData,
 ///     metadata: HostedItemMetadata("images/photo.png")
 /// )
 ///
 /// // Download a file.
-/// let downloadException = await storage.downloadItem(
+/// try await storage.downloadItem(
 ///     at: "images/photo.png",
 ///     to: localFileURL
 /// )
@@ -66,14 +66,13 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the deletion fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the deletion fails.
     func deleteAllItems(
         at path: String,
         includeItemsInSubdirectories: Bool,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 
     /// Deletes the item at the specified path.
     ///
@@ -85,13 +84,12 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the deletion fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the deletion fails.
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 
     /// Downloads all items at the specified path to a
     /// local directory.
@@ -111,8 +109,7 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the download fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the download fails.
     // swiftlint:disable:next function_parameter_count
     func downloadAllItems(
         at path: String,
@@ -121,7 +118,7 @@ public protocol StorageDelegate: Sendable {
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 
     /// Downloads the item at the specified path to a
     /// local file URL.
@@ -138,15 +135,14 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the download fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the download fails.
     func downloadItem(
         at path: String,
         to localPath: URL,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 
     /// Recursively finds all empty directories starting
     /// at the specified path.
@@ -160,13 +156,15 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, a set of paths to empty
-    ///   directories.
+    /// - Returns: A set of paths to empty directories.
+    ///
+    /// - Throws: An ``Exception`` if the enumeration
+    ///   fails.
     func enumerateEmptyDirectories(
         startingAt path: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Callback<Set<String>, Exception>
+    ) async throws(Exception) -> Set<String>
 
     /// Returns the contents of the directory at the
     /// specified path.
@@ -182,14 +180,16 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, a ``DirectoryListing``
-    ///   describing the directory's contents.
+    /// - Returns: A ``DirectoryListing`` describing the
+    ///   directory's contents.
+    ///
+    /// - Throws: An ``Exception`` if the listing fails.
     func getDirectoryListing(
         at path: String,
         firstResultOnly: Bool,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Callback<DirectoryListing, Exception>
+    ) async throws(Exception) -> DirectoryListing
 
     /// Checks whether an item of the specified type
     /// exists at the given path.
@@ -205,15 +205,17 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, `true` if an item of the
-    ///   specified type exists; otherwise, `false`.
+    /// - Returns: `true` if an item of the specified type
+    ///   exists; otherwise, `false`.
+    ///
+    /// - Throws: An ``Exception`` if the check fails.
     func itemExists(
         as itemType: HostedItemType,
         at path: String,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
-    ) async -> Callback<Bool, Exception>
+    ) async throws(Exception) -> Bool
 
     /// Establishes the underlying connection to hosted
     /// storage without performing a data operation.
@@ -249,13 +251,15 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: On success, the size of the item in
-    ///   kilobytes.
+    /// - Returns: The size of the item in kilobytes.
+    ///
+    /// - Throws: An ``Exception`` if the measurement
+    ///   fails.
     func sizeInKilobytes(
         ofItemAt path: String,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Callback<Int, Exception>
+    ) async throws(Exception) -> Int
 
     /// Uploads data to hosted storage with the specified
     /// metadata.
@@ -270,14 +274,13 @@ public protocol StorageDelegate: Sendable {
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
     ///
-    /// - Returns: An exception if the upload fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the upload fails.
     func upload(
         _ data: Data,
         metadata: HostedItemMetadata,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Exception?
+    ) async throws(Exception)
 }
 
 public extension StorageDelegate {
@@ -299,15 +302,14 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the deletion fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the deletion fails.
     func deleteAllItems(
         at path: String,
         includeItemsInSubdirectories: Bool,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await deleteAllItems(
+    ) async throws(Exception) {
+        try await deleteAllItems(
             at: path,
             includeItemsInSubdirectories: includeItemsInSubdirectories,
             prependingEnvironment: prependingEnvironment,
@@ -330,14 +332,13 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the deletion fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the deletion fails.
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await deleteItem(
+    ) async throws(Exception) {
+        try await deleteItem(
             at: path,
             prependingEnvironment: prependingEnvironment,
             timeout: duration
@@ -368,8 +369,7 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the download fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the download fails.
     func downloadAllItems(
         at path: String,
         toDirectory localDirectory: URL,
@@ -377,8 +377,8 @@ public extension StorageDelegate {
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await downloadAllItems(
+    ) async throws(Exception) {
+        try await downloadAllItems(
             at: path,
             toDirectory: localDirectory,
             includeItemsInSubdirectories: includeItemsInSubdirectories,
@@ -409,16 +409,15 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the download fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the download fails.
     func downloadItem(
         at path: String,
         to localPath: URL,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await downloadItem(
+    ) async throws(Exception) {
+        try await downloadItem(
             at: path,
             to: localPath,
             prependingEnvironment: prependingEnvironment,
@@ -444,14 +443,16 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, a set of paths to empty
-    ///   directories.
+    /// - Returns: A set of paths to empty directories.
+    ///
+    /// - Throws: An ``Exception`` if the enumeration
+    ///   fails.
     func enumerateEmptyDirectories(
         startingAt path: String,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<Set<String>, Exception> {
-        await enumerateEmptyDirectories(
+    ) async throws(Exception) -> Set<String> {
+        try await enumerateEmptyDirectories(
             startingAt: path,
             prependingEnvironment: prependingEnvironment,
             timeout: duration
@@ -477,15 +478,17 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, a ``DirectoryListing``
-    ///   describing the directory's contents.
+    /// - Returns: A ``DirectoryListing`` describing the
+    ///   directory's contents.
+    ///
+    /// - Throws: An ``Exception`` if the listing fails.
     func getDirectoryListing(
         at path: String,
         firstResultOnly: Bool = false,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<DirectoryListing, Exception> {
-        await getDirectoryListing(
+    ) async throws(Exception) -> DirectoryListing {
+        try await getDirectoryListing(
             at: path,
             firstResultOnly: firstResultOnly,
             prependingEnvironment: prependingEnvironment,
@@ -514,16 +517,18 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, `true` if an item of the
-    ///   specified type exists; otherwise, `false`.
+    /// - Returns: `true` if an item of the specified type
+    ///   exists; otherwise, `false`.
+    ///
+    /// - Throws: An ``Exception`` if the check fails.
     func itemExists(
         as itemType: HostedItemType = .file,
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<Bool, Exception> {
-        await itemExists(
+    ) async throws(Exception) -> Bool {
+        try await itemExists(
             as: itemType,
             at: path,
             prependingEnvironment: prependingEnvironment,
@@ -549,14 +554,16 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: On success, the size of the item in
-    ///   kilobytes.
+    /// - Returns: The size of the item in kilobytes.
+    ///
+    /// - Throws: An ``Exception`` if the measurement
+    ///   fails.
     func sizeInKilobytes(
         ofItemAt path: String,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Callback<Int, Exception> {
-        await sizeInKilobytes(
+    ) async throws(Exception) -> Int {
+        try await sizeInKilobytes(
             ofItemAt: path,
             prependingEnvironment: prependingEnvironment,
             timeout: duration
@@ -582,15 +589,14 @@ public extension StorageDelegate {
     ///     operation times out. The default is 10
     ///     seconds.
     ///
-    /// - Returns: An exception if the upload fails, or
-    ///   `nil` on success.
+    /// - Throws: An ``Exception`` if the upload fails.
     func upload(
         _ data: Data,
         metadata: HostedItemMetadata,
         prependingEnvironment: Bool = true,
         timeout duration: Duration = .seconds(10)
-    ) async -> Exception? {
-        await upload(
+    ) async throws(Exception) {
+        try await upload(
             data,
             metadata: metadata,
             prependingEnvironment: prependingEnvironment,

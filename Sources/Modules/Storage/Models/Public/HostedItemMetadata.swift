@@ -27,7 +27,7 @@ import FirebaseStorage
 ///     contentType: "image/png"
 /// )
 ///
-/// let exception = await storage.upload(
+/// try await storage.upload(
 ///     imageData,
 ///     metadata: metadata
 /// )

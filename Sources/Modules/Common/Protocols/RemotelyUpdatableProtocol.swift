@@ -386,13 +386,11 @@ extension RemotelyUpdatable where Representation == [String: Any] {
             identifier,
         ].joined(separator: "/")
 
-        if let exception = await database.updateChildValues(
+        try await database.updateChildValues(
             forKey: parentKeyPath,
             with: updated.encoded.filter { changedKeys.contains($0.key) },
             prependingEnvironment: networkPathPrependsCurrentEnvironment
-        ) {
-            throw exception
-        }
+        )
 
         return updated
     }
@@ -428,13 +426,11 @@ extension RemotelyUpdatable {
             updating: newValue
         ) {
         case let .encoded(value):
-            if let exception = await database.setValue(
+            try await database.setValue(
                 value,
                 forKey: valueKeyPath,
                 prependingEnvironment: networkPathPrependsCurrentEnvironment
-            ) {
-                throw exception
-            }
+            )
 
         case let .handled(updated):
             return try await didWrite(
@@ -444,32 +440,26 @@ extension RemotelyUpdatable {
 
         case .proceed:
             if let serializable = value as? any Serializable {
-                if let exception = await database.setValue(
+                try await database.setValue(
                     serializable.encoded,
                     forKey: valueKeyPath,
                     prependingEnvironment: networkPathPrependsCurrentEnvironment
-                ) {
-                    throw exception
-                }
+                )
             } else if let serializable = value as? [any Serializable] {
                 // swiftformat:disable all
                 let encoded = serializable.map { $0.encoded }
                 // swiftformat:enable all
-                if let exception = await database.setValue(
+                try await database.setValue(
                     encoded.isEmpty ? Array.bangQualifiedEmpty : encoded,
                     forKey: valueKeyPath,
                     prependingEnvironment: networkPathPrependsCurrentEnvironment
-                ) {
-                    throw exception
-                }
+                )
             } else if database.isEncodable(value) {
-                if let exception = await database.setValue(
+                try await database.setValue(
                     value,
                     forKey: valueKeyPath,
                     prependingEnvironment: networkPathPrependsCurrentEnvironment
-                ) {
-                    throw exception
-                }
+                )
             } else {
                 throw .Networking.notSerialized(
                     data: [key.rawValue: value],

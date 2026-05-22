@@ -23,21 +23,14 @@ import AppSubsystem
 /// ``authenticateUser(authID:verificationCode:)``:
 ///
 /// ```swift
-/// let verifyPhoneNumberResult = await auth.verifyPhoneNumber(
+/// let authID = try await auth.verifyPhoneNumber(
 ///     internationalNumber: "15551234567"
 /// )
 ///
-/// switch verifyPhoneNumberResult {
-/// case let .success(authID):
-///     let authenticateUserResult = await auth.authenticateUser(
-///         authID: authID,
-///         verificationCode: userEnteredCode
-///     )
-///     // Handle sign-in result.
-///
-/// case let .failure(exception):
-///     // Handle verification failure.
-/// }
+/// let userID = try await auth.authenticateUser(
+///     authID: authID,
+///     verificationCode: userEnteredCode
+/// )
 /// ```
 ///
 /// A default implementation backed by Firebase Phone
@@ -60,12 +53,13 @@ public protocol AuthDelegate {
     ///   - verificationCode: The one-time code the user
     ///     received via SMS.
     ///
-    /// - Returns: On success, a string representing the
-    ///   user's ID.
+    /// - Returns: A string representing the user's ID.
+    ///
+    /// - Throws: An ``Exception`` if sign-in fails.
     func authenticateUser(
         authID: String,
         verificationCode: String
-    ) async -> Callback<String, Exception>
+    ) async throws(Exception) -> String
 
     /// Sends a verification code to the specified phone
     /// number.
@@ -84,12 +78,14 @@ public protocol AuthDelegate {
     ///   - languageCode: A language code used to localize
     ///     the verification SMS.
     ///
-    /// - Returns: On success, a string representing the
-    ///   phone number verification ID.
+    /// - Returns: A string representing the phone number
+    ///   verification ID.
+    ///
+    /// - Throws: An ``Exception`` if verification fails.
     func verifyPhoneNumber(
         internationalNumber: String,
         languageCode: String
-    ) async -> Callback<String, Exception>
+    ) async throws(Exception) -> String
 }
 
 public extension AuthDelegate {
@@ -109,13 +105,15 @@ public extension AuthDelegate {
     ///     the verification SMS. The default is
     ///     `RuntimeStorage.languageCode`.
     ///
-    /// - Returns: On success, a string representing the
-    ///   phone number verification ID.
+    /// - Returns: A string representing the phone number
+    ///   verification ID.
+    ///
+    /// - Throws: An ``Exception`` if verification fails.
     func verifyPhoneNumber(
         internationalNumber: String,
         languageCode: String = RuntimeStorage.languageCode
-    ) async -> Callback<String, Exception> {
-        await verifyPhoneNumber(
+    ) async throws(Exception) -> String {
+        try await verifyPhoneNumber(
             internationalNumber: internationalNumber,
             languageCode: languageCode
         )

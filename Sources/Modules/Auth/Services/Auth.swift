@@ -26,26 +26,25 @@ struct Auth: AuthDelegate {
     func authenticateUser(
         authID: String,
         verificationCode: String
-    ) async -> Callback<String, Exception> {
+    ) async throws(Exception) -> String {
         guard Networking.isReadWriteEnabled else {
-            return .failure(.Networking.readWriteAccessDisabled(.init(sender: self)))
+            throw .Networking.readWriteAccessDisabled(.init(sender: self))
         }
 
         guard isOnline else {
-            return .failure(.internetConnectionOffline(metadata: .init(sender: self)))
+            throw .internetConnectionOffline(metadata: .init(sender: self))
         }
 
         Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
 
         let credential = phoneAuthProvider.credential(withVerificationID: authID, verificationCode: verificationCode)
 
         do {
             let signInResult = try await firebaseAuth.signIn(with: credential)
-            Networking.config.activityIndicatorDelegate.hide()
-            return .success(signInResult.user.uid)
+            return signInResult.user.uid
         } catch {
-            Networking.config.activityIndicatorDelegate.hide()
-            return .failure(.init(error, metadata: .init(sender: self)))
+            throw .init(error, metadata: .init(sender: self))
         }
     }
 
@@ -54,26 +53,25 @@ struct Auth: AuthDelegate {
     func verifyPhoneNumber(
         internationalNumber: String,
         languageCode: String
-    ) async -> Callback<String, Exception> {
+    ) async throws(Exception) -> String {
         guard Networking.isReadWriteEnabled else {
-            return .failure(.Networking.readWriteAccessDisabled(.init(sender: self)))
+            throw .Networking.readWriteAccessDisabled(.init(sender: self))
         }
 
         guard isOnline else {
-            return .failure(.internetConnectionOffline(metadata: .init(sender: self)))
+            throw .internetConnectionOffline(metadata: .init(sender: self))
         }
 
         Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
+
         firebaseAuth.languageCode = languageCode
 
         let formattedNumber = "+\(internationalNumber.digits)"
         do {
-            let authID = try await phoneAuthProvider.verifyPhoneNumber(formattedNumber, uiDelegate: nil)
-            Networking.config.activityIndicatorDelegate.hide()
-            return .success(authID)
+            return try await phoneAuthProvider.verifyPhoneNumber(formattedNumber, uiDelegate: nil)
         } catch {
-            Networking.config.activityIndicatorDelegate.hide()
-            return .failure(.init(error, metadata: .init(sender: self)))
+            throw .init(error, metadata: .init(sender: self))
         }
     }
 }

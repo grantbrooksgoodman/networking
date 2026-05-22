@@ -153,26 +153,20 @@ In pre-release builds with Developer Mode enabled, the environment can also be s
 
 ### Auth
 
-The [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift) protocol defines a two-step phone authentication flow. First, verify the phone number to receive a verification ID. Then, authenticate the user with the verification code they received:
+The [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift) protocol defines a two-step phone authentication flow. First, verify the phone number to receive a verification ID. Then, authenticate the user with the verification code they received. Both methods use typed throws – they return their result directly and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.auth) var auth: AuthDelegate
 
-let verifyPhoneNumberResult = await auth.verifyPhoneNumber(
+let verificationID = try await auth.verifyPhoneNumber(
     internationalNumber: "+15551234567",
     languageCode: "en"
 )
 
-switch verifyPhoneNumberResult {
-case let .success(verificationID):
-    let authenticateUserResult = await auth.authenticateUser(
-        authID: verificationID,
-        verificationCode: "123456"
-    )
-
-case let .failure(exception):
-    // Handle failure.
-}
+let userID = try await auth.authenticateUser(
+    authID: verificationID,
+    verificationCode: "123456"
+)
 ```
 
 ### Common
@@ -302,12 +296,10 @@ Once a type conforms to `Serializable`, you can write it to the database through
 ```swift
 @Dependency(\.networking.database) var database: DatabaseDelegate
 
-if let exception = await database.setValue(
+try await database.setValue(
     document.encoded,
     forKey: "documents/\(document.identifier)"
-) {
-    Logger.log(exception)
-}
+)
 ```
 
 And reconstruct it from stored data:
@@ -484,7 +476,7 @@ ContentView()
 
 ### Database
 
-The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. Read and query operations use typed throws – they return the result as an inferred type and throw an `Exception` on failure:
+The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. All operations use typed throws – they return their result directly (when applicable) and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.database) var database: DatabaseDelegate
@@ -495,7 +487,7 @@ let values: [String: Any] = try await database.getValues(
 )
 
 // Write a value.
-let exception = await database.setValue(
+try await database.setValue(
     "Jane",
     forKey: "users/123/name"
 )
@@ -542,7 +534,7 @@ Networking.config.registerGeminiAPIKeyDelegate(
 Then pass an [`EnhancementConfiguration`](Sources/Modules/Gemini/Models/Public/EnhancementConfiguration.swift) when translating:
 
 ```swift
-let translateResult = await hostedTranslation.translate(
+let translation = try await hostedTranslation.translate(
     .init("Hello"),
     with: LanguagePair(from: "en", to: "es"),
     enhance: EnhancementConfiguration(
@@ -555,25 +547,25 @@ The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum
 
 ### Storage
 
-The [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) protocol provides file-level access to hosted cloud storage. Upload, download, delete, and inspect files and directories:
+The [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) protocol provides file-level access to hosted cloud storage. Upload, download, delete, and inspect files and directories. All operations use typed throws – they return their result directly (when applicable) and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.storage) var storage: StorageDelegate
 
 // Upload data.
-let uploadException = await storage.upload(
+try await storage.upload(
     data,
     metadata: HostedItemMetadata("avatars/user123.png")
 )
 
 // Download an item to a local path.
-let downloadException = await storage.downloadItem(
+try await storage.downloadItem(
     at: "avatars/user123.png",
     to: localFileURL
 )
 
 // List directory contents.
-let getDirectoryListingResult = await storage.getDirectoryListing(
+let directoryListing = try await storage.getDirectoryListing(
     at: "avatars"
 )
 ```
@@ -588,12 +580,12 @@ let getDirectoryListingResult = await storage.getDirectoryListing(
 
 ### Translation
 
-The [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift) protocol translates strings through the hosted translation service:
+The [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift) protocol translates strings through the hosted translation service. All operations use typed throws – they return their result directly and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.hostedTranslation) var translator
 
-let translateResult = await translator.translate(
+let translation = try await translator.translate(
     .init("Hello"),
     with: LanguagePair(from: "en", to: "es")
 )

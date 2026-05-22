@@ -72,11 +72,13 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             )
         }
 
-        if let exception = await database.updateChildValues(
-            forKey: "\(NetworkPath.translations.rawValue)/\(translation.languagePair.string)",
-            with: [translation.reference.type.key: referenceValue]
-        ) {
-            return exception
+        do {
+            try await database.updateChildValues(
+                forKey: "\(NetworkPath.translations.rawValue)/\(translation.languagePair.string)",
+                with: [translation.reference.type.key: referenceValue]
+            )
+        } catch {
+            return error
         }
 
         Logger.log(
@@ -194,12 +196,14 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     ) async -> Exception? {
         let path = "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/\(languagePair.string)"
 
-        if let exception = await database.updateChildValues(
-            forKey: path,
-            with: [input.value.encodedHash: NSNull()],
-            prependingEnvironment: false
-        ) {
-            return exception
+        do {
+            try await database.updateChildValues(
+                forKey: path,
+                with: [input.value.encodedHash: NSNull()],
+                prependingEnvironment: false
+            )
+        } catch {
+            return error
         }
 
         CoreDatabaseStore.removeValue(forKey: "\(path)/\(input.value.encodedHash)")
