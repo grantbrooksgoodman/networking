@@ -112,7 +112,10 @@ public extension Exception {
             userInfo: [String: Any]? = nil,
             metadata: ExceptionMetadata
         ) -> Exception {
-            .init(
+            var userInfo = userInfo ?? [:]
+            userInfo["StaticErrorCode"] = "3530"
+
+            return .init(
                 "Failed to typecast values \(typeName == nil ? "." : "to \(typeName!).")",
                 userInfo: userInfo,
                 metadata: metadata

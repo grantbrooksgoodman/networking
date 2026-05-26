@@ -62,7 +62,7 @@ All modules are compiled into a single `Networking` library. There are no separa
 
 | Platform | Minimum Version |
 | --- | --- |
-| iOS | 17.0 |
+| iOS | 18.0 |
 
 ---
 

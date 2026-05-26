@@ -578,7 +578,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
         languagePair: LanguagePair,
         hud hudConfig: AlertKit.HUDConfig?,
         timeout timeoutConfig: AlertKit.TranslationTimeoutConfig
-    ) async -> Result<[Translation], TranslationError> {
+    ) async throws -> [Translation] {
         let hudTask: Task<Void, Never>? = hudConfig.map { hudConfig in
             Task {
                 try? await Task.sleep(for: hudConfig.appearsAfter)
@@ -636,16 +636,17 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
             switch getTranslationsResult {
             case let .success(translations):
                 guard translations.count == inputs.count else {
-                    return .failure(.unknown(
-                        "Mismatched ratio returned."
-                    ))
+                    throw Exception(
+                        "Mismatched ratio returned.",
+                        metadata: .init(sender: self)
+                    )
                 }
 
-                return .success(translations)
+                return translations
 
             case let .failure(exception):
                 guard timeoutConfig.returnsInputsOnFailure else {
-                    return .failure(.unknown(exception.descriptor))
+                    throw exception
                 }
 
                 Logger.log(
@@ -653,12 +654,12 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                     domain: .Networking.hostedTranslation
                 )
 
-                return .success(fallbackTranslations)
+                return fallbackTranslations
             }
 
         case .timedOut:
             guard timeoutConfig.returnsInputsOnFailure else {
-                return .failure(.timedOut)
+                throw Exception.timedOut(metadata: .init(sender: self))
             }
 
             Logger.log(
@@ -666,7 +667,7 @@ extension HostedTranslationService: AlertKit.TranslationDelegate {
                 domain: .Networking.hostedTranslation
             )
 
-            return .success(fallbackTranslations)
+            return fallbackTranslations
         }
     }
 }
