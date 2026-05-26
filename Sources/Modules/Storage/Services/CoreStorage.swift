@@ -67,8 +67,8 @@ final class CoreStorage: @unchecked Sendable {
         _ operation: StorageOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Callback<Any?, Exception> {
-        await Self.coalescer(
+    ) async throws(Exception) -> Any? {
+        try await Self.coalescer(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
@@ -79,7 +79,7 @@ final class CoreStorage: @unchecked Sendable {
             ).encodedHash
         ) { [weak self] in
             guard let self else {
-                return .failure(.init(
+                return .failure(Exception(
                     "Service has been deallocated.",
                     metadata: .init(sender: Self.self)
                 ))
@@ -90,18 +90,23 @@ final class CoreStorage: @unchecked Sendable {
                     operation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
-                ) { callback in
-                    continuation.resume(returning: callback)
+                ) { result in
+                    switch result {
+                    case let .success(value):
+                        continuation.resume(returning: .success(value))
+                    case let .failure(exception):
+                        continuation.resume(returning: .failure(exception))
+                    }
                 }
             }
-        }
+        }.get()
     }
 
     private func _performOperation(
         _ operation: StorageOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration,
-        completion: @escaping (Callback<Any?, Exception>) -> Void
+        completion: @escaping (Result<Any?, Exception>) -> Void
     ) {
         guard Networking.isReadWriteEnabled else {
             return completion(.failure(
@@ -123,98 +128,99 @@ final class CoreStorage: @unchecked Sendable {
         }
 
         Task {
-            let result: Callback<Any?, Exception>
-
-            switch operation {
-            case let .deleteAllItems(
-                atPath: path,
-                includeItemsInSubdirectories: includeItemsInSubdirectories
-            ):
-                result = await deleteAllItems(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+            do throws(Exception) {
+                let result: Any? = switch operation {
+                case let .deleteAllItems(
+                    atPath: path,
                     includeItemsInSubdirectories: includeItemsInSubdirectories
-                )
+                ):
+                    try await deleteAllItems(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        includeItemsInSubdirectories: includeItemsInSubdirectories
+                    )
 
-            case let .deleteItem(
-                atPath: path
-            ):
-                result = await deleteItem(at: prependingEnvironment ? path.prependingCurrentEnvironment : path)
+                case let .deleteItem(
+                    atPath: path
+                ):
+                    try await deleteItem(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                    )
 
-            case let .downloadAllItems(
-                atPath: path,
-                toDirectory: localDirectory,
-                includeItemsInSubdirectories: includeItemsInSubdirectories,
-                cacheStrategy: cacheStrategy
-            ):
-                result = await downloadAllItems(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                case let .downloadAllItems(
+                    atPath: path,
                     toDirectory: localDirectory,
                     includeItemsInSubdirectories: includeItemsInSubdirectories,
-                    cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                )
+                    cacheStrategy: cacheStrategy
+                ):
+                    try await downloadAllItems(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        toDirectory: localDirectory,
+                        includeItemsInSubdirectories: includeItemsInSubdirectories,
+                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                    )
 
-            case let .downloadItem(
-                atPath: path,
-                toLocalPath: localPath,
-                cacheStrategy: cacheStrategy
-            ):
-                result = await downloadItem(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                    to: localPath,
-                    cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                )
+                case let .downloadItem(
+                    atPath: path,
+                    toLocalPath: localPath,
+                    cacheStrategy: cacheStrategy
+                ):
+                    try await downloadItem(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        to: localPath,
+                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                    )
 
-            case let .enumerateEmptyDirectories(
-                startingAt: path
-            ):
-                result = await enumerateEmptyDirectories(
-                    startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
-                )
+                case let .enumerateEmptyDirectories(
+                    startingAt: path
+                ):
+                    try await enumerateEmptyDirectories(
+                        startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                    )
 
-            case let .getDirectoryListing(
-                atPath: path,
-                firstResultOnly: firstResultOnly
-            ):
-                let getDirectoryListingResult = await getDirectoryListing(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                case let .getDirectoryListing(
+                    atPath: path,
                     firstResultOnly: firstResultOnly
-                )
-                switch getDirectoryListingResult {
-                case let .success(directoryListing): result = .success(directoryListing)
-                case let .failure(exception): result = .failure(exception)
+                ):
+                    try await getDirectoryListing(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        firstResultOnly: firstResultOnly
+                    )
+
+                case let .itemExists(
+                    asItemType: itemType,
+                    atPath: path,
+                    cacheStrategy: cacheStrategy
+                ):
+                    try await itemExists(
+                        as: itemType,
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                    )
+
+                case let .sizeInKilobytes(
+                    ofItemAtPath: path
+                ):
+                    try await sizeInKilobytes(
+                        ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                    )
+
+                case let .upload(
+                    data,
+                    metadata: metadata
+                ):
+                    try await upload(
+                        data,
+                        metadata: metadata,
+                        prependingEnvironment: prependingEnvironment
+                    )
                 }
 
-            case let .itemExists(
-                asItemType: itemType,
-                atPath: path,
-                cacheStrategy: cacheStrategy
-            ):
-                result = await itemExists(
-                    as: itemType,
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                    cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                )
-
-            case let .sizeInKilobytes(
-                ofItemAtPath: path
-            ):
-                result = await sizeInKilobytes(
-                    ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
-                )
-
-            case let .upload(
-                data,
-                metadata: metadata
-            ):
-                result = await upload(
-                    data,
-                    metadata: metadata,
-                    prependingEnvironment: prependingEnvironment
-                )
+                timeout.cancel()
+                completion(.success(result))
+            } catch {
+                timeout.cancel()
+                completion(.failure(error))
             }
-
-            timeout.cancel()
-            completion(result)
         }
     }
 
@@ -224,7 +230,7 @@ final class CoreStorage: @unchecked Sendable {
         _ data: Data,
         metadata: HostedItemMetadata,
         prependingEnvironment: Bool
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         Logger.log(
             "Uploading data to path \"\(metadata.filePath)\".",
             domain: .Networking.storage,
@@ -234,32 +240,21 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[metadata.filePath] = nil
         $storedItemExistsResults[metadata.filePath] = nil
 
-        if let exception = await _upload(
-            data,
-            metadata: metadata,
-            prependingEnvironment: prependingEnvironment
-        ) {
-            return .failure(exception)
-        }
-
-        return .success(nil)
-    }
-
-    private func _upload(
-        _ data: Data,
-        metadata: HostedItemMetadata,
-        prependingEnvironment: Bool
-    ) async -> Exception? {
         do {
             _ = try await firebaseStorage.putDataAsync(
                 data,
-                metadata: metadata.asStorageMetadata(prependingEnvironment: prependingEnvironment)
+                metadata: metadata.asStorageMetadata(
+                    prependingEnvironment: prependingEnvironment
+                )
             )
-
-            return nil
         } catch {
-            return .init(error, metadata: .init(sender: self))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
+
+        return nil
     }
 
     // MARK: - Deletion
@@ -267,31 +262,27 @@ final class CoreStorage: @unchecked Sendable {
     private func deleteAllItems(
         at path: String,
         includeItemsInSubdirectories: Bool
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         Logger.log(
             "Deleting all items at path \"\(path)\".",
             domain: .Networking.storage,
             sender: self
         )
 
-        if let exception = await _deleteAllItems(
+        try await _deleteAllItems(
             at: path,
             includeItemsInSubdirectories: includeItemsInSubdirectories
-        ) {
-            return .failure(exception)
-        }
+        )
 
-        return .success(nil)
+        return nil
     }
 
-    private func deleteItem(at path: String) async -> Callback<Any?, Exception> {
-        if let exception = await _itemExists(
+    private func deleteItem(at path: String) async throws(Exception) -> Any? {
+        try await _itemExists(
             as: .file,
             at: path,
             returnCacheOnFailure: false
-        ) {
-            return .failure(exception)
-        }
+        )
 
         Logger.log(
             "Deleting item at path \"\(path)\".",
@@ -302,35 +293,45 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[path] = nil
         $storedItemExistsResults[path] = nil
 
-        if let exception = await _deleteItem(at: path) {
-            return .failure(exception)
+        do {
+            try await firebaseStorage.child(path).delete()
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
 
-        return .success(nil)
+        return nil
     }
 
     private func _deleteAllItems(
         at path: String,
         includeItemsInSubdirectories: Bool,
         exceptions: [Exception] = []
-    ) async -> Exception? {
+    ) async throws(Exception) {
         var exceptions = exceptions
 
         $storedDownloadItemResults[path] = nil
         $storedItemExistsResults[path] = nil
 
         Networking.config.activityIndicatorDelegate.show()
-        let getDirectoryListingResult = await getDirectoryListing(at: path)
 
-        switch getDirectoryListingResult {
-        case let .success(directoryListing):
-            await withTaskGroup(of: Exception?.self) { taskGroup in
+        do throws(Exception) {
+            let directoryListing = try await getDirectoryListing(at: path)
+
+            await withTaskGroup(
+                of: Exception?.self
+            ) { taskGroup in
                 for filePath in directoryListing.filePaths {
                     taskGroup.addTask {
-                        switch await self.deleteItem(at: filePath) {
-                        case let .failure(exception): exception
-                        case .success: nil
+                        do throws(Exception) {
+                            _ = try await self.deleteItem(at: filePath)
+                        } catch {
+                            return error
                         }
+
+                        return nil
                     }
                 }
 
@@ -339,32 +340,37 @@ final class CoreStorage: @unchecked Sendable {
                 }
             }
 
-            guard includeItemsInSubdirectories else { return exceptions.compiledException }
+            if !includeItemsInSubdirectories {
+                if let exception = exceptions.compiledException {
+                    throw exception
+                }
+
+                return
+            }
 
             for subdirectory in directoryListing.subdirectories {
-                if let exception = await _deleteAllItems(
-                    at: subdirectory,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories,
-                    exceptions: exceptions
-                ) {
-                    exceptions.append(exception)
+                do {
+                    try await _deleteAllItems(
+                        at: subdirectory,
+                        includeItemsInSubdirectories: includeItemsInSubdirectories,
+                        exceptions: exceptions
+                    )
+                } catch {
+                    exceptions.append(error)
                 }
             }
 
-            return exceptions.compiledException
-
-        case let .failure(exception):
-            guard let underlyingException = exceptions.compiledException else { return exception }
-            return exception.appending(underlyingException: underlyingException)
-        }
-    }
-
-    private func _deleteItem(at path: String) async -> Exception? {
-        do {
-            try await firebaseStorage.child(path).delete()
-            return nil
+            if let exception = exceptions.compiledException {
+                throw exception
+            }
         } catch {
-            return .init(error, metadata: .init(sender: self))
+            guard let underlyingException = exceptions.compiledException else {
+                throw error
+            }
+
+            throw error.appending(
+                underlyingException: underlyingException
+            )
         }
     }
 
@@ -375,36 +381,34 @@ final class CoreStorage: @unchecked Sendable {
         toDirectory localDirectory: URL,
         includeItemsInSubdirectories: Bool,
         cacheStrategy: CacheStrategy
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         Logger.log(
             "Downloading all items at path \"\(path)\".",
             domain: .Networking.storage,
             sender: self
         )
 
-        if let exception = await _downloadAllItems(
+        try await _downloadAllItems(
             at: path,
             toDirectory: localDirectory,
             includeItemsInSubdirectories: includeItemsInSubdirectories,
             cacheStrategy: cacheStrategy
-        ) {
-            return .failure(exception)
-        }
+        )
 
-        return .success(nil)
+        return nil
     }
 
     private func downloadItem(
         at path: String,
         to localPath: URL,
         cacheStrategy: CacheStrategy
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         if cacheStrategy == .returnCacheFirst,
            storedDownloadItemResultIsValid(
                localPath: localPath,
                networkPath: path
            ) {
-            return .success(nil)
+            return nil
         }
 
         Logger.log(
@@ -414,18 +418,20 @@ final class CoreStorage: @unchecked Sendable {
         )
 
         let downloadItemStartDate = Date.now
-        if let exception = await _downloadItem(
-            at: path,
-            to: localPath
-        ) {
+        do {
+            try await _downloadItem(
+                at: path,
+                to: localPath
+            )
+        } catch {
             guard cacheStrategy == .returnCacheOnFailure,
                   storedDownloadItemResultIsValid(
                       localPath: localPath,
                       networkPath: path
-                  ) else { return .failure(exception) }
+                  ) else { throw error }
 
-            Logger.log(exception, domain: .Networking.storage)
-            return .success(nil)
+            Logger.log(error, domain: .Networking.storage)
+            return nil
         }
 
         $storedDownloadItemResults[path] = .init(
@@ -433,7 +439,7 @@ final class CoreStorage: @unchecked Sendable {
             expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: downloadItemStartDate))
         )
 
-        return .success(nil)
+        return nil
     }
 
     private func _downloadAllItems(
@@ -442,15 +448,17 @@ final class CoreStorage: @unchecked Sendable {
         includeItemsInSubdirectories: Bool,
         cacheStrategy: CacheStrategy,
         exceptions: [Exception] = []
-    ) async -> Exception? {
+    ) async throws(Exception) {
         var exceptions = exceptions
 
         Networking.config.activityIndicatorDelegate.show()
-        let getDirectoryListingResult = await getDirectoryListing(at: path)
 
-        switch getDirectoryListingResult {
-        case let .success(directoryListing):
-            await withTaskGroup(of: Exception?.self) { taskGroup in
+        do throws(Exception) {
+            let directoryListing = try await getDirectoryListing(at: path)
+
+            await withTaskGroup(
+                of: Exception?.self
+            ) { taskGroup in
                 for filePath in directoryListing.filePaths {
                     guard let fileName = filePath.fileName else {
                         exceptions.append(.init(
@@ -463,14 +471,17 @@ final class CoreStorage: @unchecked Sendable {
 
                     let destination = localDirectory.appending(path: "/\(path)/\(fileName)")
                     taskGroup.addTask {
-                        switch await self.downloadItem(
-                            at: filePath,
-                            to: destination,
-                            cacheStrategy: cacheStrategy
-                        ) {
-                        case let .failure(exception): exception
-                        case .success: nil
+                        do throws(Exception) {
+                            _ = try await self.downloadItem(
+                                at: filePath,
+                                to: destination,
+                                cacheStrategy: cacheStrategy
+                            )
+                        } catch {
+                            return error
                         }
+
+                        return nil
                     }
                 }
 
@@ -479,96 +490,118 @@ final class CoreStorage: @unchecked Sendable {
                 }
             }
 
-            guard includeItemsInSubdirectories else { return exceptions.compiledException }
+            if !includeItemsInSubdirectories {
+                if let exception = exceptions.compiledException {
+                    throw exception
+                }
+
+                return
+            }
 
             for subdirectory in directoryListing.subdirectories {
-                if let exception = await _downloadAllItems(
-                    at: subdirectory,
-                    toDirectory: localDirectory,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories,
-                    cacheStrategy: cacheStrategy,
-                    exceptions: exceptions
-                ) {
-                    exceptions.append(exception)
+                do {
+                    try await _downloadAllItems(
+                        at: subdirectory,
+                        toDirectory: localDirectory,
+                        includeItemsInSubdirectories: includeItemsInSubdirectories,
+                        cacheStrategy: cacheStrategy,
+                        exceptions: exceptions
+                    )
+                } catch {
+                    exceptions.append(error)
                 }
             }
 
-            return exceptions.compiledException
+            if let exception = exceptions.compiledException {
+                throw exception
+            }
+        } catch {
+            guard let underlyingException = exceptions.compiledException else {
+                throw error
+            }
 
-        case let .failure(exception):
-            guard let underlyingException = exceptions.compiledException else { return exception }
-            return exception.appending(underlyingException: underlyingException)
+            throw error.appending(
+                underlyingException: underlyingException
+            )
         }
     }
 
     private func _downloadItem(
         at path: String,
         to localPath: URL
-    ) async -> Exception? {
+    ) async throws(Exception) {
         do {
-            _ = try await firebaseStorage.child(path).writeAsync(toFile: localPath)
-            return nil
+            _ = try await firebaseStorage
+                .child(path)
+                .writeAsync(toFile: localPath)
+        } catch let error as Exception {
+            throw error
         } catch {
-            return .init(error, metadata: .init(sender: self))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 
     // MARK: - Enumeration
 
-    private func enumerateEmptyDirectories(startingAt path: String) async -> Callback<Any?, Exception> {
+    private func enumerateEmptyDirectories(
+        startingAt path: String
+    ) async throws(Exception) -> Any? {
         Logger.log(
             "Enumerating empty directories, starting at \"\(path)\".",
             domain: .Networking.storage,
             sender: self
         )
 
-        let enumerateEmptyDirectoriesResult = await _enumerateEmptyDirectories(startingAt: path)
-
-        switch enumerateEmptyDirectoriesResult {
-        case let .success(emptyDirectories): return .success(emptyDirectories)
-        case let .failure(exception): return .failure(exception)
-        }
+        return try await _enumerateEmptyDirectories(startingAt: path)
     }
 
     private func getDirectoryListing(
         at path: String,
         firstResultOnly: Bool = false
-    ) async -> Callback<DirectoryListing, Exception> {
+    ) async throws(Exception) -> DirectoryListing {
+        let listResult: StorageListResult!
+
         do {
-            let listResult: StorageListResult! = if firstResultOnly {
+            listResult = if firstResultOnly {
                 try await firebaseStorage.child(path).list(maxResults: 1)
             } else {
                 try await firebaseStorage.child(path).listAll()
             }
-
-            let directoryListing = DirectoryListing(listResult)
-
-            if directoryListing.filePaths.isEmpty,
-               directoryListing.subdirectories.isEmpty {
-                return .failure(.Networking.hostedItemTypeMismatch(
-                    at: path,
-                    type: nil,
-                    .init(sender: self)
-                ))
-            }
-
-            return .success(directoryListing)
         } catch {
-            return .failure(.init(error, metadata: .init(sender: self)))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
+
+        let directoryListing = DirectoryListing(listResult)
+
+        if directoryListing.filePaths.isEmpty,
+           directoryListing.subdirectories.isEmpty {
+            throw .Networking.hostedItemTypeMismatch(
+                at: path,
+                type: nil,
+                .init(sender: self)
+            )
+        }
+
+        return directoryListing
     }
 
     private func itemExists(
         as itemType: HostedItemType,
         at path: String,
         cacheStrategy: CacheStrategy
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         if cacheStrategy == .returnCacheFirst,
            storedItemExistsResultIsValid(
                itemType: itemType,
                path: path
            ) {
-            return .success(true)
+            return true
         }
 
         Logger.log(
@@ -577,110 +610,108 @@ final class CoreStorage: @unchecked Sendable {
             sender: self
         )
 
-        let exception = await _itemExists(
-            as: itemType,
-            at: path,
-            returnCacheOnFailure: cacheStrategy == .returnCacheOnFailure
-        )
+        do {
+            try await _itemExists(
+                as: itemType,
+                at: path,
+                returnCacheOnFailure: cacheStrategy == .returnCacheOnFailure
+            )
 
-        if let exception {
+            return true
+        } catch {
             Logger.log(
-                exception,
+                error,
                 domain: .Networking.storage
             )
-        }
 
-        return .success(exception == nil)
+            return false
+        }
     }
 
     private func sizeInKilobytes(
         ofItemAt path: String
-    ) async -> Callback<Any?, Exception> {
-        let getFileMetadataResult = await getFileMetadata(at: path)
-
-        switch getFileMetadataResult {
-        case let .success(metadata):
-            return .success(Int(metadata.size / 1024))
-
-        case let .failure(exception):
-            return .failure(exception)
-        }
+    ) async throws(Exception) -> Any? {
+        try await Int(getFileMetadata(at: path).size / 1024)
     }
 
     private func _enumerateEmptyDirectories(
         startingAt path: String,
         with emptyDirectories: Set<String> = .init(),
         exceptions: [Exception] = []
-    ) async -> Callback<Set<String>, Exception> {
+    ) async throws(Exception) -> Set<String> {
         var emptyDirectories = emptyDirectories
         var exceptions = exceptions
 
         Networking.config.activityIndicatorDelegate.show()
-        let getDirectoryListingResult = await getDirectoryListing(at: path)
 
-        switch getDirectoryListingResult {
-        case let .success(directoryListing):
+        do {
+            let directoryListing = try await getDirectoryListing(at: path)
+
             for subdirectory in directoryListing.subdirectories {
-                let enumerateEmptySubdirectoriesResult = await _enumerateEmptyDirectories(
-                    startingAt: subdirectory,
-                    with: emptyDirectories,
-                    exceptions: exceptions
-                )
-
-                switch enumerateEmptySubdirectoriesResult {
-                case let .success(emptySubdirectories): emptyDirectories.formUnion(emptySubdirectories)
-                case let .failure(exception): exceptions.append(exception)
+                do {
+                    try await emptyDirectories.formUnion(
+                        _enumerateEmptyDirectories(
+                            startingAt: subdirectory,
+                            with: emptyDirectories,
+                            exceptions: exceptions
+                        )
+                    )
+                } catch {
+                    exceptions.append(error)
                 }
             }
-
-        case let .failure(exception):
-            if exception.isEqual(to: .Networking.Storage.storageItemDoesNotExist) {
+        } catch {
+            if error.isEqual(
+                to: .Networking.Storage.storageItemDoesNotExist
+            ) {
                 emptyDirectories.insert(path)
             } else {
-                guard let underlyingException = exceptions.compiledException else { return .failure(exception) }
-                return .failure(exception.appending(underlyingException: underlyingException))
+                guard let underlyingException = exceptions.compiledException else {
+                    throw error
+                }
+
+                throw error.appending(
+                    underlyingException: underlyingException
+                )
             }
         }
 
         if let exception = exceptions.compiledException {
-            return .failure(exception)
+            throw exception
         }
 
-        return .success(emptyDirectories)
+        return emptyDirectories
     }
 
     private func _itemExists(
         as itemType: HostedItemType,
         at path: String,
         returnCacheOnFailure: Bool
-    ) async -> Exception? { // swiftlint:disable:next identifier_name
+    ) async throws(Exception) { // swiftlint:disable:next identifier_name
         func _itemExists(as itemType: HostedItemType) async -> Bool {
             let startDate = Date.now
             var exception: Exception?
             var cacheExpiryMilliseconds = 100
 
             if itemType == .directory {
-                let getDirectoryListingResult = await getDirectoryListing(
-                    at: path,
-                    firstResultOnly: true
-                )
-
-                cacheExpiryMilliseconds = Networking.cacheExpiryMilliseconds(for: startDate)
-
-                switch getDirectoryListingResult {
-                case let .failure(getDirectoryListingException): exception = getDirectoryListingException
-                default: ()
+                do {
+                    _ = try await getDirectoryListing(
+                        at: path,
+                        firstResultOnly: true
+                    )
+                } catch {
+                    exception = error
                 }
 
+                cacheExpiryMilliseconds = Networking.cacheExpiryMilliseconds(for: startDate)
             } else {
-                let getFileMetadataResult = await getFileMetadata(at: path)
+                do {
+                    _ = try await getFileMetadata(at: path)
+                } catch {
+                    exception = error
+                }
 
                 cacheExpiryMilliseconds = Networking.cacheExpiryMilliseconds(for: startDate)
-
-                switch getFileMetadataResult {
-                case let .failure(getFileMetadataException): exception = getFileMetadataException
-                default: ()
-                }
             }
 
             guard let exception else {
@@ -717,40 +748,38 @@ final class CoreStorage: @unchecked Sendable {
 
         if existsAsFile,
            itemType == .file {
-            return nil
+            return
         }
 
         let existsAsDirectory = await _itemExists(as: .directory)
 
         if existsAsDirectory,
            itemType == .directory {
-            return nil
+            return
         }
 
         if existsAsDirectory,
            itemType == .file {
-            return .Networking.hostedItemTypeMismatch(
+            throw .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: .file,
                 .init(sender: self)
             )
         } else if existsAsFile,
                   itemType == .directory {
-            return .Networking.hostedItemTypeMismatch(
+            throw .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: .directory,
                 .init(sender: self)
             )
         } else if !existsAsDirectory,
                   !existsAsFile {
-            return .Networking.hostedItemTypeMismatch(
+            throw .Networking.hostedItemTypeMismatch(
                 at: path,
                 type: nil,
                 .init(sender: self)
             )
         }
-
-        return nil // Should never execute.
     }
 
     // MARK: - Clear Store
@@ -762,12 +791,16 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Auxiliary
 
-    private func getFileMetadata(at path: String) async -> Callback<StorageMetadata, Exception> {
+    private func getFileMetadata(
+        at path: String
+    ) async throws(Exception) -> StorageMetadata {
         do {
-            let getMetadataResult = try await firebaseStorage.child(path).getMetadata()
-            return .success(getMetadataResult)
+            return try await firebaseStorage.child(path).getMetadata()
         } catch {
-            return .failure(.init(error, metadata: .init(sender: self)))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 

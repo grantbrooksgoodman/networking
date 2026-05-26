@@ -74,7 +74,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         try await archiver.findArchivedTranslation(
             id: inputValueEncodedHash,
             languagePair: languagePair
-        ).get()
+        )
     }
 
     // MARK: - Label String Resolution
@@ -129,38 +129,31 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         )
 
         var preprocessingException: Exception?
-
-        await withTaskGroup(of: (Int, Callback<PreprocessingResult, Exception>).self) { taskGroup in
+        await withTaskGroup(
+            of: (Int, Result<PreprocessingResult, Exception>).self
+        ) { taskGroup in
             for (index, input) in inputs.enumerated() {
                 taskGroup.addTask {
-                    if let prevalidateInputResult = await self.prevalidateInput(
-                        input,
-                        languagePair: languagePair
-                    ) {
-                        switch prevalidateInputResult {
-                        case let .success(translation):
+                    do throws(Exception) {
+                        if let translation = try await self.prevalidateInput(
+                            input,
+                            languagePair: languagePair
+                        ) {
                             return (index, .success(.archiveHit(translation)))
-
-                        case let .failure(exception):
-                            return (index, .failure(exception))
                         }
-                    }
 
-                    if let checkHostedArchiveResult = await self.checkHostedArchive(
-                        for: input,
-                        languagePair: languagePair,
-                        enhancementConfig: enhancementConfig
-                    ) {
-                        switch checkHostedArchiveResult {
-                        case let .success(translation):
+                        if let translation = try await self.checkHostedArchive(
+                            for: input,
+                            languagePair: languagePair,
+                            enhancementConfig: enhancementConfig
+                        ) {
                             return (index, .success(.archiveHit(translation)))
-
-                        case let .failure(exception):
-                            return (index, .failure(exception))
                         }
-                    }
 
-                    return (index, .success(.archiveMiss))
+                        return (index, .success(.archiveMiss))
+                    } catch {
+                        return (index, .failure(error))
+                    }
                 }
             }
 
@@ -213,29 +206,36 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 languagePair: languagePair
             )
         } catch {
-            throw .init(
+            throw Exception(
                 error,
                 metadata: .init(sender: self)
             )
         }
 
         guard translations.count == archiveMisses.count else {
-            throw .init(
+            throw Exception(
                 "Mismatched ratio returned.",
                 metadata: .init(sender: self)
             )
         }
 
         var exception: Exception?
-        await withTaskGroup(of: (Int, Callback<Translation, Exception>).self) { taskGroup in
+        await withTaskGroup(
+            of: (Int, Result<Translation, Exception>).self
+        ) { taskGroup in
             for (slot, translation) in zip(archiveMisses, translations) {
                 let slotIndex = slot.index
                 taskGroup.addTask {
-                    await (slotIndex, self.postProcess(
-                        translation,
-                        enhancementConfig: enhancementConfig,
-                        archiveTreatment: .addToBothArchives
-                    ))
+                    do throws(Exception) {
+                        let processedTranslation = try await self.postProcess(
+                            translation,
+                            enhancementConfig: enhancementConfig,
+                            archiveTreatment: .addToBothArchives
+                        )
+                        return (slotIndex, .success(processedTranslation))
+                    } catch {
+                        return (slotIndex, .failure(error))
+                    }
                 }
             }
 
@@ -262,7 +262,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
 
         let finalTranslations = resolvedTranslations.compactMap(\.self)
         guard finalTranslations.count == inputs.count else {
-            throw .init(
+            throw Exception(
                 "Mismatched ratio returned.",
                 metadata: .init(sender: self)
             )
@@ -277,26 +277,22 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
         enhance enhancementConfig: EnhancementConfiguration?
     ) async throws(Exception) -> Translation {
-        let prevalidateInputResult = await prevalidateInput(
+        if let translation = try await prevalidateInput(
             input,
             languagePair: languagePair
-        )
-
-        if let prevalidateInputResult {
-            return try prevalidateInputResult.get()
+        ) {
+            return translation
         }
 
         Networking.config.activityIndicatorDelegate.show()
         defer { Networking.config.activityIndicatorDelegate.hide() }
 
-        let checkHostedArchiveResult = await checkHostedArchive(
+        if let translation = try await checkHostedArchive(
             for: input,
             languagePair: languagePair,
             enhancementConfig: enhancementConfig
-        )
-
-        if let checkHostedArchiveResult {
-            return try checkHostedArchiveResult.get()
+        ) {
+            return translation
         }
 
         let sourceLanguageName = languagePair.from.englishLanguageName ?? languagePair.from.uppercased()
@@ -315,7 +311,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             domain: .Networking.hostedTranslation
         )
 
-        do throws(Exception) {
+        do {
             return try await postProcess(
                 translator.translate(
                     .init(
@@ -328,7 +324,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 ),
                 enhancementConfig: enhancementConfig,
                 archiveTreatment: .addToBothArchives
-            ).get()
+            )
         } catch {
             guard error.isEqual(toAny: [
                 .Networking.Translation.exhaustedAvailablePlatforms,
@@ -345,7 +341,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 ),
                 enhancementConfig: enhancementConfig,
                 archiveTreatment: .addToBothArchives
-            ).get()
+            )
         }
     }
 
@@ -355,51 +351,58 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         for input: TranslationInput,
         languagePair: LanguagePair,
         enhancementConfig: EnhancementConfiguration?
-    ) async -> Callback<Translation, Exception>? {
-        let findArchivedTranslationResult = await archiver.findArchivedTranslation(
-            input: input,
-            languagePair: languagePair
-        )
+    ) async throws(Exception) -> Translation? {
+        let translation: Translation
 
-        switch findArchivedTranslationResult {
-        case let .success(translation):
-            if TranslationValidator.validate(
-                translation: translation,
-                metadata: .init(sender: self)
-            ) != nil || translation.input.value == translation.output {
-                if let exception = await archiver.removeArchivedTranslation(
-                    for: input,
-                    languagePair: languagePair
-                ) {
-                    return .failure(exception)
-                }
-
-                return nil
-            }
-
-            return await postProcess(
-                translation,
-                enhancementConfig: nil,
-                archiveTreatment: .addToLocalArchive
+        do {
+            translation = try await archiver.findArchivedTranslation(
+                input: input,
+                languagePair: languagePair
             )
-
-        case let .failure(exception):
-            guard exception.isEqual(toAny: [
+        } catch {
+            guard error.isEqual(toAny: [
                 .Networking.Database.noValueExists,
                 .Networking.Translation.translationDerivationFailed,
             ]) else {
-                return .failure(exception)
+                throw error
             }
 
             return nil
         }
+
+        let translationFailsValidation: Bool
+        do {
+            try TranslationValidator.validate(
+                translation: translation,
+                metadata: .init(sender: self)
+            )
+            translationFailsValidation = false
+        } catch {
+            translationFailsValidation = true
+        }
+
+        if translationFailsValidation ||
+            translation.input.value == translation.output {
+            try await archiver.removeArchivedTranslation(
+                for: input,
+                languagePair: languagePair
+            )
+
+            return nil
+        }
+
+        return try await postProcess(
+            translation,
+            enhancementConfig: nil,
+            archiveTreatment: .addToLocalArchive
+        )
     }
 
     private func postProcess(
         _ translation: Translation,
         enhancementConfig: EnhancementConfiguration?,
         archiveTreatment: ArchiveTreatment?
-    ) async -> Callback<Translation, Exception> {
+    ) async throws(Exception) -> Translation {
         var translation = translation
 
         if let enhancementConfig,
@@ -408,20 +411,11 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
            !$geminiCataloguedTranslationInputs.contains(translation.input.value),
            Networking.config.geminiAPIKeyDelegate?.apiKey.isBlank == false,
            translation.isEligibleForAIEnhancement {
-            let enhanceResult = await GeminiService.shared.enhance(
-                translation,
-                using: enhancementConfig
-            )
-
-            @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
-            $geminiCataloguedTranslationInputs.withValue {
-                $0.insert(translation.input.value)
-                persistedArchive = $0.isEmpty ? nil : $0
-            }
-
-            if let enhanceResult {
-                switch enhanceResult {
-                case let .success(enhancedTranslation):
+            do {
+                if let enhancedTranslation = try await GeminiService.shared.enhance(
+                    translation,
+                    using: enhancementConfig
+                ) {
                     Logger.log(.init(
                         "Successfully AI-enhanced translation.",
                         isReportable: false,
@@ -443,58 +437,58 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     }
 
                     translation = enhancedTranslation
-
-                case let .failure(exception):
-                    Logger.log(
-                        exception,
-                        domain: .Networking.hostedTranslation
-                    )
-
-                    if build.milestone != .generalRelease,
-                       Networking.config.enhancedTranslationStatusVerbosity == .errorsOnly ||
-                       Networking.config.enhancedTranslationStatusVerbosity == .successAndErrors {
-                        Toast.show(.init(
-                            .capsule(style: .warning),
-                            message: exception.userFacingDescriptor,
-                            perpetuation: .ephemeral(.seconds(3))
-                        ))
-                    }
                 }
+            } catch {
+                Logger.log(
+                    error,
+                    domain: .Networking.hostedTranslation
+                )
+
+                if build.milestone != .generalRelease,
+                   Networking.config.enhancedTranslationStatusVerbosity == .errorsOnly ||
+                   Networking.config.enhancedTranslationStatusVerbosity == .successAndErrors {
+                    Toast.show(.init(
+                        .capsule(style: .warning),
+                        message: error.userFacingDescriptor,
+                        perpetuation: .ephemeral(.seconds(3))
+                    ))
+                }
+            }
+
+            @Persistent(.geminiCataloguedTranslationInputs) var persistedArchive: Set<String>?
+            $geminiCataloguedTranslationInputs.withValue {
+                $0.insert(translation.input.value)
+                persistedArchive = $0.isEmpty ? nil : $0
             }
         }
 
-        if let exception = TranslationValidator.validate(
+        try TranslationValidator.validate(
             translation: translation,
             metadata: .init(sender: self)
-        ) {
-            return .failure(exception)
-        }
+        )
 
         if archiveTreatment == .addToBothArchives ||
-            archiveTreatment == .addToHostedArchive,
-            let exception = await archiver.addToHostedArchive(translation) {
-            return .failure(exception)
+            archiveTreatment == .addToHostedArchive {
+            try await archiver.addToHostedArchive(translation)
         }
 
         guard translation.input.value != translation.output,
               archiveTreatment == .addToBothArchives ||
-              archiveTreatment == .addToLocalArchive else { return .success(translation) }
+              archiveTreatment == .addToLocalArchive else { return translation }
 
         localTranslationArchiver.addValue(translation)
-        return .success(translation)
+        return translation
     }
 
     private func prevalidateInput(
         _ input: TranslationInput,
         languagePair: LanguagePair
-    ) async -> Callback<Translation, Exception>? {
-        if let exception = TranslationValidator.validate(
+    ) async throws(Exception) -> Translation? {
+        try TranslationValidator.validate(
             inputs: [input],
             languagePair: languagePair,
             metadata: .init(sender: self)
-        ) {
-            return .failure(exception)
-        }
+        )
 
         // If language pair is idempotent, return original input.
 
@@ -505,7 +499,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 languagePair: languagePair
             )
 
-            return await postProcess(
+            return try await postProcess(
                 translation,
                 enhancementConfig: nil,
                 archiveTreatment: nil
@@ -518,10 +512,19 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             inputValueEncodedHash: input.value.encodedHash,
             languagePair: languagePair
         ) {
-            if TranslationValidator.validate(
-                translation: archivedTranslation,
-                metadata: .init(sender: self)
-            ) != nil || archivedTranslation.input.value == archivedTranslation.output {
+            let translationFailsValidation: Bool
+            do {
+                try TranslationValidator.validate(
+                    translation: archivedTranslation,
+                    metadata: .init(sender: self)
+                )
+                translationFailsValidation = false
+            } catch {
+                translationFailsValidation = true
+            }
+
+            if translationFailsValidation ||
+                archivedTranslation.input.value == archivedTranslation.output {
                 localTranslationArchiver.removeValue(
                     inputValueEncodedHash: input.value.encodedHash,
                     languagePair: languagePair
@@ -529,7 +532,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                 return nil
             }
 
-            return await postProcess(
+            return try await postProcess(
                 archivedTranslation,
                 enhancementConfig: nil,
                 archiveTreatment: nil
@@ -545,7 +548,7 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         ) > 0.8
 
         if !hasUnicodeLetters || sameInputOutputLanguage {
-            return await postProcess(
+            return try await postProcess(
                 Translation(
                     input: input,
                     output: input.value.sanitized,

@@ -35,20 +35,22 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     init() {
         Task.background(delayedBy: .seconds(10)) { [weak self] in
-            guard let exception = await self?.populateTranslationDataSnapshot(
-                expiryThreshold: .seconds(300)
-            ) else {
-                return Logger.log(
+            do throws(Exception) {
+                try await self?.populateTranslationDataSnapshot(
+                    expiryThreshold: .seconds(300)
+                )
+
+                Logger.log(
                     "Populated translation data snapshot.",
                     domain: .Networking.hostedTranslation,
                     sender: self ?? HostedTranslationArchiver.self
                 )
+            } catch {
+                Logger.log(
+                    error,
+                    domain: .Networking.hostedTranslation
+                )
             }
-
-            Logger.log(
-                exception,
-                domain: .Networking.hostedTranslation
-            )
         }
     }
 
@@ -56,30 +58,24 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     nonisolated(nonsending) func addToHostedArchive(
         _ translation: Translation
-    ) async -> Exception? {
-        if let exception = TranslationValidator.validate(
+    ) async throws(Exception) {
+        try TranslationValidator.validate(
             translation: translation,
             metadata: .init(sender: self)
-        ) {
-            return exception
-        }
+        )
 
         guard !translation.languagePair.isIdempotent,
               let referenceValue = translation.reference.type.value else {
-            return .init(
+            throw Exception(
                 "Translation language pair is idempotent; ineligible for hosted archive.",
                 metadata: .init(sender: self)
             )
         }
 
-        do {
-            try await database.updateChildValues(
-                forKey: "\(NetworkPath.translations.rawValue)/\(translation.languagePair.string)",
-                with: [translation.reference.type.key: referenceValue]
-            )
-        } catch {
-            return error
-        }
+        try await database.updateChildValues(
+            forKey: "\(NetworkPath.translations.rawValue)/\(translation.languagePair.string)",
+            with: [translation.reference.type.key: referenceValue]
+        )
 
         Logger.log(
             .init(
@@ -90,8 +86,6 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             ),
             domain: .Networking.hostedTranslation
         )
-
-        return nil
     }
 
     // MARK: - Find Archived Translations
@@ -99,21 +93,17 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     nonisolated(nonsending) func findArchivedTranslation(
         input: TranslationInput,
         languagePair: LanguagePair
-    ) async -> Callback<Translation, Exception> {
-        let findArchivedTranslationResult = await findArchivedTranslation(
-            id: input.value.encodedHash,
-            languagePair: languagePair
-        )
-
-        switch findArchivedTranslationResult {
-        case let .success(translation):
-            return .success(translation)
-
-        case let .failure(exception):
-            guard exception.isEqual(
+    ) async throws(Exception) -> Translation {
+        do {
+            return try await findArchivedTranslation(
+                id: input.value.encodedHash,
+                languagePair: languagePair
+            )
+        } catch {
+            guard error.isEqual(
                 to: .Networking.Database.noValueExists
-            ) else { return .failure(exception) }
-            return await deriveTranslation(
+            ) else { throw error }
+            return try await deriveTranslation(
                 input: input,
                 inputValueEncodedHash: input.value.encodedHash,
                 languagePair: languagePair
@@ -124,15 +114,17 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     nonisolated(nonsending) func findArchivedTranslation(
         id inputValueEncodedHash: String,
         languagePair: LanguagePair
-    ) async -> Callback<Translation, Exception> {
+    ) async throws(Exception) -> Translation {
         let path = "\(NetworkPath.translations.rawValue)/\(languagePair.string)/\(inputValueEncodedHash)"
         let userInfo = ["Path": path]
 
-        if let exception = TranslationValidator.validate(
-            languagePair: languagePair,
-            metadata: .init(sender: self)
-        ) {
-            return .failure(exception.appending(userInfo: userInfo))
+        do {
+            try TranslationValidator.validate(
+                languagePair: languagePair,
+                metadata: .init(sender: self)
+            )
+        } catch {
+            throw error.appending(userInfo: userInfo)
         }
 
         if $state.translationDataSample != .empty,
@@ -147,11 +139,11 @@ final class HostedTranslationArchiver: @unchecked Sendable {
            .value
            .decodedTranslationComponents {
             // NIT: Theoretically, we should have these in the archive already.
-            return .success(.init(
+            return .init(
                 input: .init(components.input),
                 output: components.output,
                 languagePair: languagePair
-            ))
+            )
         }
 
         let translationDataString: String
@@ -162,8 +154,8 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         } catch {
             guard error.isEqual(
                 to: .Networking.Database.noValueExists
-            ) else { return .failure(error.appending(userInfo: userInfo)) }
-            return await deriveTranslation(
+            ) else { throw error.appending(userInfo: userInfo) }
+            return try await deriveTranslation(
                 input: nil,
                 inputValueEncodedHash: inputValueEncodedHash,
                 languagePair: languagePair
@@ -171,20 +163,16 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         }
 
         guard let components = translationDataString.decodedTranslationComponents else {
-            return .failure(
-                .Networking.decodingFailed(
-                    data: translationDataString,
-                    .init(sender: self)
-                ).appending(userInfo: userInfo)
-            )
+            throw .Networking.decodingFailed(
+                data: translationDataString,
+                .init(sender: self)
+            ).appending(userInfo: userInfo)
         }
 
-        return .success(
-            .init(
-                input: .init(components.input),
-                output: components.output,
-                languagePair: languagePair
-            )
+        return .init(
+            input: .init(components.input),
+            output: components.output,
+            languagePair: languagePair
         )
     }
 
@@ -193,21 +181,18 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     nonisolated(nonsending) func removeArchivedTranslation(
         for input: TranslationInput,
         languagePair: LanguagePair
-    ) async -> Exception? {
+    ) async throws(Exception) {
         let path = "\(Networking.config.environment.shortString)/\(NetworkPath.translations.rawValue)/\(languagePair.string)"
 
-        do {
-            try await database.updateChildValues(
-                forKey: path,
-                with: [input.value.encodedHash: NSNull()],
-                prependingEnvironment: false
-            )
-        } catch {
-            return error
-        }
+        try await database.updateChildValues(
+            forKey: path,
+            with: [input.value.encodedHash: NSNull()],
+            prependingEnvironment: false
+        )
 
-        CoreDatabaseStore.removeValue(forKey: "\(path)/\(input.value.encodedHash)")
-        return nil
+        CoreDatabaseStore.removeValue(
+            forKey: "\(path)/\(input.value.encodedHash)"
+        )
     }
 
     // MARK: - Auxiliary
@@ -216,10 +201,8 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         input originalInput: TranslationInput?,
         inputValueEncodedHash originalInputHash: String,
         languagePair originalLanguagePair: LanguagePair
-    ) async -> Callback<Translation, Exception> {
-        if let exception = await populateTranslationDataSnapshot(expiryThreshold: .seconds(120)) {
-            return .failure(exception)
-        }
+    ) async throws(Exception) -> Translation {
+        try await populateTranslationDataSnapshot(expiryThreshold: .seconds(120))
 
         for (archivedLanguagePairData, archivedTranslationData) in $state.translationDataSample.data {
             guard let archivedLanguagePair = LanguagePair(archivedLanguagePairData),
@@ -236,9 +219,8 @@ final class HostedTranslationArchiver: @unchecked Sendable {
                 languagePair: originalLanguagePair
             )
 
-            if !derivedTranslation.languagePair.isIdempotent,
-               let exception = await addToHostedArchive(derivedTranslation) {
-                return .failure(exception)
+            if !derivedTranslation.languagePair.isIdempotent {
+                try await addToHostedArchive(derivedTranslation)
             }
 
             Logger.log(
@@ -256,18 +238,18 @@ final class HostedTranslationArchiver: @unchecked Sendable {
                 with: .toastInPrerelease(style: .success)
             )
 
-            return .success(derivedTranslation)
+            return derivedTranslation
         }
 
-        return .failure(.init(
+        throw Exception(
             "Failed to derive translation from existing data.",
             metadata: .init(sender: self)
-        ))
+        )
     }
 
     private nonisolated(nonsending) func populateTranslationDataSnapshot(
         expiryThreshold: Duration
-    ) async -> Exception? {
+    ) async throws(Exception) {
         let shouldProceed = $state.withValue { state in
             guard !state.isPopulating,
                   state.translationDataSample.isExpired ||
@@ -276,7 +258,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             return true
         }
 
-        guard shouldProceed else { return nil }
+        guard shouldProceed else { return }
         let translationData: [String: [String: Any]]
 
         do {
@@ -285,7 +267,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             )
         } catch {
             $state.withValue { $0.isPopulating = false }
-            return error
+            throw error
         }
 
         $state.withValue {
@@ -333,7 +315,5 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             CoreDatabaseStore.addValues(dataSamples)
             localTranslationArchiver.addValues(translations)
         }
-
-        return nil
     }
 }

@@ -242,8 +242,8 @@ final class CoreDatabase: @unchecked Sendable {
         _ operation: DatabaseOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration
-    ) async -> Callback<Any?, Exception> {
-        await Self.coalescer(
+    ) async throws(Exception) -> Any? {
+        try await Self.coalescer(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
@@ -254,7 +254,7 @@ final class CoreDatabase: @unchecked Sendable {
             ).encodedHash
         ) { [weak self] in
             guard let self else {
-                return .failure(.init(
+                return .failure(Exception(
                     "Service has been deallocated.",
                     metadata: .init(sender: Self.self)
                 ))
@@ -265,18 +265,23 @@ final class CoreDatabase: @unchecked Sendable {
                     operation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
-                ) { callback in
-                    continuation.resume(returning: callback)
+                ) { result in
+                    switch result {
+                    case let .success(value):
+                        continuation.resume(returning: .success(value))
+                    case let .failure(exception):
+                        continuation.resume(returning: .failure(exception))
+                    }
                 }
             }
-        }
+        }.get()
     }
 
     private func _performOperation(
         _ operation: DatabaseOperation,
         prependingEnvironment: Bool,
         timeout duration: Duration,
-        completion: @escaping (Callback<Any?, Exception>) -> Void
+        completion: @escaping (Result<Any?, Exception>) -> Void
     ) {
         guard Networking.isReadWriteEnabled else {
             return completion(.failure(
@@ -298,48 +303,53 @@ final class CoreDatabase: @unchecked Sendable {
         }
 
         Task {
-            let result: Callback<Any?, Exception> = switch operation {
-            case let .getValues(
-                atPath: path,
-                cacheStrategy: cacheStrategy
-            ):
-                await getValues(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                    cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                )
+            do throws(Exception) {
+                let result: Any? = switch operation {
+                case let .getValues(
+                    atPath: path,
+                    cacheStrategy: cacheStrategy
+                ):
+                    try await getValues(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                    )
 
-            case let .queryValues(
-                atPath: path,
-                strategy: strategy,
-                cacheStrategy: cacheStrategy
-            ):
-                await queryValues(
-                    at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                case let .queryValues(
+                    atPath: path,
                     strategy: strategy,
-                    cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                )
+                    cacheStrategy: cacheStrategy
+                ):
+                    try await queryValues(
+                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                        strategy: strategy,
+                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                    )
 
-            case let .setValue(
-                value,
-                forKey: key
-            ):
-                await setValue(
+                case let .setValue(
                     value,
-                    forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
-                )
+                    forKey: key
+                ):
+                    try await setValue(
+                        value,
+                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
+                    )
 
-            case let .updateChildValues(
-                forKey: key,
-                withData: data
-            ):
-                await updateChildValues(
-                    forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
-                    with: data
-                )
+                case let .updateChildValues(
+                    forKey: key,
+                    withData: data
+                ):
+                    try await updateChildValues(
+                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
+                        with: data
+                    )
+                }
+
+                timeout.cancel()
+                completion(.success(result))
+            } catch {
+                timeout.cancel()
+                completion(.failure(error))
             }
-
-            timeout.cancel()
-            completion(result)
         }
     }
 
@@ -348,14 +358,14 @@ final class CoreDatabase: @unchecked Sendable {
     private func getValues(
         at path: String,
         cacheStrategy: CacheStrategy
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
         }
 
         if cacheStrategy == .returnCacheFirst,
            let cachedValue {
-            return .success(cachedValue)
+            return cachedValue
         }
 
         Logger.log(
@@ -365,10 +375,9 @@ final class CoreDatabase: @unchecked Sendable {
         )
 
         let getValuesStartDate = Date.now
-        let getValuesResult = await _getValues(at: path)
+        do {
+            let values = try await _getValues(at: path)
 
-        switch getValuesResult {
-        case let .success(values):
             CoreDatabaseStore.addValue(
                 .init(
                     data: values,
@@ -377,49 +386,57 @@ final class CoreDatabase: @unchecked Sendable {
                 forKey: path
             )
 
-            return .success(values)
-
-        case let .failure(exception):
+            return values
+        } catch {
             if cacheStrategy == .returnCacheOnFailure,
                let cachedValue {
-                return .success(cachedValue)
+                return cachedValue
             }
 
-            return .failure(exception)
+            throw error
         }
     }
 
-    private func _getValues(at path: String) async -> Callback<Any, Exception> {
-        await withCheckedContinuation { continuation in
-            @LockIsolated var didResume = false
-            var canResume: Bool {
-                $didResume.withValue {
-                    guard !$0 else { return false }
-                    $0 = true
-                    return true
+    private func _getValues(at path: String) async throws(Exception) -> Any {
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                @LockIsolated var didResume = false
+                var canResume: Bool {
+                    $didResume.withValue {
+                        guard !$0 else { return false }
+                        $0 = true
+                        return true
+                    }
                 }
-            }
 
-            firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in
-                guard !self.isEmpty(snapshot.value),
-                      let value = snapshot.value else {
+                firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in
+                    guard !self.isEmpty(snapshot.value),
+                          let value = snapshot.value else {
+                        guard canResume else { return }
+                        return continuation.resume(throwing: Exception(
+                            "No value exists at the specified key path.",
+                            userInfo: ["Path": path],
+                            metadata: .init(sender: self)
+                        ))
+                    }
+
                     guard canResume else { return }
-                    return continuation.resume(returning: .failure(.init(
-                        "No value exists at the specified key path.",
-                        userInfo: ["Path": path],
+                    continuation.resume(returning: value)
+                } withCancel: { error in
+                    guard canResume else { return }
+                    continuation.resume(throwing: Exception(
+                        error,
                         metadata: .init(sender: self)
-                    )))
+                    ))
                 }
-
-                guard canResume else { return }
-                continuation.resume(returning: .success(value))
-            } withCancel: { error in
-                guard canResume else { return }
-                continuation.resume(returning: .failure(.init(
-                    error,
-                    metadata: .init(sender: self)
-                )))
             }
+        } catch let error as Exception {
+            throw error
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 
@@ -427,14 +444,14 @@ final class CoreDatabase: @unchecked Sendable {
         at path: String,
         strategy: QueryStrategy,
         cacheStrategy: CacheStrategy
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
         }
 
         if cacheStrategy == .returnCacheFirst,
            let cachedValue {
-            return .success(cachedValue)
+            return cachedValue
         }
 
         Logger.log(
@@ -444,36 +461,6 @@ final class CoreDatabase: @unchecked Sendable {
         )
 
         let queryValuesStartDate = Date.now
-        let queryValuesResult = await _queryValues(
-            at: path,
-            strategy: strategy
-        )
-
-        switch queryValuesResult {
-        case let .success(values):
-            CoreDatabaseStore.addValue(
-                .init(
-                    data: values,
-                    expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: queryValuesStartDate))
-                ),
-                forKey: path
-            )
-
-            return .success(values)
-
-        case let .failure(exception):
-            guard cacheStrategy == .returnCacheOnFailure,
-                  let cachedValue else { return .failure(exception) }
-
-            Logger.log(exception, domain: .Networking.database)
-            return .success(cachedValue)
-        }
-    }
-
-    private func _queryValues(
-        at path: String,
-        strategy: QueryStrategy
-    ) async -> Callback<Any, Exception> {
         let reference = firebaseDatabase.child(path)
         let query: DatabaseQuery! = switch strategy {
         case let .first(limit): reference.queryLimited(toFirst: .init(limit))
@@ -484,16 +471,39 @@ final class CoreDatabase: @unchecked Sendable {
             let getDataResult = try await query.getData()
             guard !isEmpty(getDataResult.value),
                   let value = getDataResult.value else {
-                return .failure(.init(
+                throw Exception(
                     "No value exists at the specified key path.",
                     userInfo: ["Path": path],
                     metadata: .init(sender: self)
-                ))
+                )
             }
 
-            return .success(value)
+            CoreDatabaseStore.addValue(
+                .init(
+                    data: value,
+                    expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: queryValuesStartDate))
+                ),
+                forKey: path
+            )
+
+            return value
+        } catch let error as Exception {
+            guard cacheStrategy == .returnCacheOnFailure,
+                  let cachedValue else { throw error }
+
+            Logger.log(error, domain: .Networking.database)
+            return cachedValue
         } catch {
-            return .failure(.init(error, metadata: .init(sender: self)))
+            let exception = Exception(
+                error,
+                metadata: .init(sender: self)
+            )
+
+            guard cacheStrategy == .returnCacheOnFailure,
+                  let cachedValue else { throw exception }
+
+            Logger.log(exception, domain: .Networking.database)
+            return cachedValue
         }
     }
 
@@ -502,12 +512,12 @@ final class CoreDatabase: @unchecked Sendable {
     private func setValue(
         _ value: Any,
         forKey key: String
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         guard isEncodable(value) else {
-            return .failure(.Networking.invalidType(
+            throw .Networking.invalidType(
                 value: value,
                 .init(sender: self)
-            ))
+            )
         }
 
         Logger.log(
@@ -516,11 +526,15 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        if let exception = await _setValue(
-            value,
-            forKey: key
-        ) {
-            return .failure(exception)
+        do {
+            _ = try await firebaseDatabase
+                .child(key)
+                .setValue(value)
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
 
         CoreDatabaseStore.addValue(
@@ -531,30 +545,18 @@ final class CoreDatabase: @unchecked Sendable {
             forKey: key
         )
 
-        return .success(nil)
-    }
-
-    private func _setValue(
-        _ value: Any,
-        forKey key: String
-    ) async -> Exception? {
-        do {
-            _ = try await firebaseDatabase.child(key).setValue(value)
-            return nil
-        } catch {
-            return .init(error, metadata: .init(sender: self))
-        }
+        return nil
     }
 
     private func updateChildValues(
         forKey key: String,
         with data: [String: Any]
-    ) async -> Callback<Any?, Exception> {
+    ) async throws(Exception) -> Any? {
         guard data.values.allSatisfy({ isEncodable($0) }) else {
-            return .failure(.Networking.invalidType(
+            throw .Networking.invalidType(
                 value: data,
                 .init(sender: self)
-            ))
+            )
         }
 
         Logger.log(
@@ -563,11 +565,15 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        if let exception = await _updateChildValues(
-            forKey: key,
-            with: data
-        ) {
-            return .failure(exception)
+        do {
+            _ = try await firebaseDatabase
+                .child(key)
+                .updateChildValues(data)
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
 
         CoreDatabaseStore.addValue(
@@ -578,19 +584,7 @@ final class CoreDatabase: @unchecked Sendable {
             forKey: key
         )
 
-        return .success(nil)
-    }
-
-    private func _updateChildValues(
-        forKey key: String,
-        with data: [String: Any]
-    ) async -> Exception? {
-        do {
-            _ = try await firebaseDatabase.child(key).updateChildValues(data)
-            return nil
-        } catch {
-            return .init(error, metadata: .init(sender: self))
-        }
+        return nil
     }
 
     // MARK: - Auxiliary

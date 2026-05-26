@@ -17,17 +17,14 @@ import Translator
 ///
 /// Use `TranslationValidator` to check that values are
 /// well-formed before passing them to the translation
-/// service. The method returns `nil` when all provided
-/// arguments pass validation:
+/// service. The method throws when validation fails:
 ///
 /// ```swift
-/// if let exception = TranslationValidator.validate(
+/// try TranslationValidator.validate(
 ///     inputs: inputs,
 ///     languagePair: pair,
 ///     metadata: .init(sender: self)
-/// ) {
-///     // Handle invalid input.
-/// }
+/// )
 /// ```
 public enum TranslationValidator {
     /// Validates the specified inputs, language pair,
@@ -47,14 +44,14 @@ public enum TranslationValidator {
     ///   - metadata: The exception metadata to attach
     ///     if validation fails.
     ///
-    /// - Returns: An exception describing the validation
-    ///   failure, or `nil` if all arguments are valid.
+    /// - Throws: An exception describing the validation
+    ///   failure.
     public static func validate(
         inputs: [TranslationInput]? = nil,
         languagePair: LanguagePair? = nil,
         translation: Translation? = nil,
         metadata: ExceptionMetadata
-    ) -> Exception? {
+    ) throws(Exception) {
         assert(
             inputs != nil ||
                 languagePair != nil ||
@@ -84,22 +81,29 @@ public enum TranslationValidator {
 
         if let inputs {
             guard inputs.isWellFormed else {
-                return Exceptions.inputsFailValidation(userInfo: userInfo, metadata)
+                throw Exceptions.inputsFailValidation(
+                    userInfo: userInfo,
+                    metadata
+                )
             }
         }
 
         if let languagePair {
             guard languagePair.isWellFormed else {
-                return Exceptions.languagePairFailsValidation(userInfo: userInfo, metadata)
+                throw Exceptions.languagePairFailsValidation(
+                    userInfo: userInfo,
+                    metadata
+                )
             }
         }
 
         if let translation {
             guard translation.isWellFormed else {
-                return Exceptions.translationFailsValidation(userInfo: userInfo, metadata)
+                throw Exceptions.translationFailsValidation(
+                    userInfo: userInfo,
+                    metadata
+                )
             }
         }
-
-        return nil
     }
 }

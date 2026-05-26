@@ -31,7 +31,7 @@ struct GeminiService {
 
     static let shared = GeminiService()
 
-    private let cachedEnhancedOutputValidationResults = LockIsolated<[CacheKey: Exception?]>([:])
+    private let cachedEnhancedOutputValidationResults = LockIsolated([CacheKey: Exception]())
 
     // MARK: - Init
 
@@ -42,16 +42,15 @@ struct GeminiService {
     func enhance(
         _ translation: Translation,
         using configuration: EnhancementConfiguration
-    ) async -> Callback<Translation, Exception>? {
+    ) async throws(Exception) -> Translation? {
         guard let geminiAPIKey = Networking.config.geminiAPIKeyDelegate?.apiKey else {
-            return .failure(.init(
+            throw Exception(
                 "Gemini API key delegate has not been registered.",
                 metadata: .init(sender: self)
-            ))
+            )
         }
 
-        var urlRequest: URLRequest!
-        let getURLRequestResult = getURLRequest(
+        let urlRequest = try getURLRequest(
             for: getGeminiRequest(
                 for: translation,
                 using: configuration
@@ -60,76 +59,63 @@ struct GeminiService {
             using: configuration.model
         )
 
-        switch getURLRequestResult { // swiftlint:disable:next identifier_name
-        case let .success(_urlRequest): urlRequest = _urlRequest
-        case let .failure(exception): return .failure(exception)
-        }
-
+        let data: Data
+        let urlResponse: URLResponse
         do {
-            let (data, urlResponse) = try await urlSession.data(for: urlRequest)
-
-            var geminiResponse: GeminiResponse!
-            let getGeminiResponseResult = getGeminiResponse(
-                from: data,
-                urlResponse: urlResponse
-            )
-
-            switch getGeminiResponseResult { // swiftlint:disable:next identifier_name
-            case let .success(_geminiResponse): geminiResponse = _geminiResponse
-            case let .failure(exception): return .failure(exception)
-            }
-
-            guard let candidates = geminiResponse.candidates else {
-                return .failure(.init(
-                    "No candidates returned in response.",
-                    metadata: .init(sender: self)
-                ))
-            }
-
-            if candidates.count > 1 {
-                let concatenatedCandidates = candidates
-                    .compactMap(\.content?.concatenatedText)
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .joined(separator: "\n\n")
-
-                Logger.log(.init(
-                    "Gemini response had multiple candidates.",
-                    isReportable: false,
-                    userInfo: ["ConcatenatedCandidates": concatenatedCandidates],
-                    metadata: .init(sender: self)
-                ), domain: .Networking.hostedTranslation)
-            }
-
-            guard let enhancedOutput = candidates
-                .compactMap(\.content)
-                .first?
-                .concatenatedText?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-                !enhancedOutput.isEmpty else {
-                return .failure(.init(
-                    "Response was empty.",
-                    metadata: .init(sender: self)
-                ))
-            }
-
-            if let exception = await validateEnhancedOutput(
-                for: translation,
-                enhancedOutput: enhancedOutput
-            ) {
-                return .failure(exception)
-            }
-
-            return .success(.init(
-                input: translation.input,
-                output: "※\(enhancedOutput)",
-                languagePair: translation.languagePair
-            ))
+            (data, urlResponse) = try await urlSession.data(for: urlRequest)
         } catch {
-            return .failure(.init(
+            throw Exception(
                 error,
                 metadata: .init(sender: self)
-            ))
+            )
         }
+
+        guard let candidates = try getGeminiResponse(
+            from: data,
+            urlResponse: urlResponse
+        ).candidates else {
+            throw Exception(
+                "No candidates returned in response.",
+                metadata: .init(sender: self)
+            )
+        }
+
+        if candidates.count > 1 {
+            let concatenatedCandidates = candidates
+                .compactMap(\.content?.concatenatedText)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .joined(separator: "\n\n")
+
+            Logger.log(.init(
+                "Gemini response had multiple candidates.",
+                isReportable: false,
+                userInfo: ["ConcatenatedCandidates": concatenatedCandidates],
+                metadata: .init(sender: self)
+            ), domain: .Networking.hostedTranslation)
+        }
+
+        guard let enhancedOutput = candidates
+            .compactMap(\.content)
+            .first?
+            .concatenatedText?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !enhancedOutput.isEmpty else {
+            throw Exception(
+                "Response was empty.",
+                metadata: .init(sender: self)
+            )
+        }
+
+        try await validateEnhancedOutput(
+            for: translation,
+            enhancedOutput: enhancedOutput
+        )
+
+        return .init(
+            input: translation.input,
+            output: "※\(enhancedOutput)",
+            languagePair: translation.languagePair
+        )
     }
 
     // MARK: - Auxiliary
@@ -179,7 +165,7 @@ struct GeminiService {
     private func getGeminiResponse(
         from data: Data,
         urlResponse: URLResponse
-    ) -> Callback<GeminiResponse, Exception> {
+    ) throws(Exception) -> GeminiResponse {
         guard let httpResponse = urlResponse as? HTTPURLResponse,
               (200 ..< 300).contains(httpResponse.statusCode) else {
             let serverBody = String(
@@ -187,26 +173,26 @@ struct GeminiService {
                 encoding: .utf8
             ) ?? "<non-utf8>"
 
-            return .failure(.init(
+            throw Exception(
                 "URL response did not indicate success.",
                 userInfo: [
                     "ServerBody": serverBody,
                     "URLResponseCode": (urlResponse as? HTTPURLResponse)?.statusCode ?? -1,
                 ],
                 metadata: .init(sender: self)
-            ))
+            )
         }
 
         do {
-            return try .success(jsonDecoder.decode(
+            return try jsonDecoder.decode(
                 GeminiResponse.self,
                 from: data
-            ))
+            )
         } catch {
-            return .failure(.init(
+            throw Exception(
                 error,
                 metadata: .init(sender: self)
-            ))
+            )
         }
     }
 
@@ -214,14 +200,14 @@ struct GeminiService {
         for geminiRequest: GeminiRequest,
         apiKey: String,
         using model: GeminiModel
-    ) -> Callback<URLRequest, Exception> {
+    ) throws(Exception) -> URLRequest {
         guard let url = URL(
             string: "https://generativelanguage.googleapis.com/v1beta/models/\(model.rawValue):generateContent?key=\(apiKey)"
         ) else {
-            return .failure(.init(
+            throw Exception(
                 "Failed to synthesize URL.",
                 metadata: .init(sender: self)
-            ))
+            )
         }
 
         var urlRequest = URLRequest(url: url)
@@ -230,26 +216,26 @@ struct GeminiService {
 
         do {
             urlRequest.httpBody = try jsonEncoder.encode(geminiRequest)
-            return .success(urlRequest)
+            return urlRequest
         } catch {
-            return .failure(.init(
+            throw Exception(
                 error,
                 metadata: .init(sender: self)
-            ))
+            )
         }
     }
 
     private func validateEnhancedOutput(
         for translation: Translation,
         enhancedOutput: String
-    ) async -> Exception? {
+    ) async throws(Exception) {
         let cacheKey = CacheKey(
             enhancedOutput: enhancedOutput,
             translation: translation
         )
 
-        if let cachedValue = cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] {
-            return cachedValue
+        if let cachedException = cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] {
+            throw cachedException
         }
 
         let languageRecognitionService = LanguageRecognitionService.shared
@@ -344,8 +330,10 @@ struct GeminiService {
             )
         }
 
-        cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] = exception
-        return exception
+        if let exception {
+            cachedEnhancedOutputValidationResults.wrappedValue[cacheKey] = exception
+            throw exception
+        }
     }
 }
 

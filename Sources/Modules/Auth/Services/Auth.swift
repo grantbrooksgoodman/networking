@@ -28,23 +28,35 @@ struct Auth: AuthDelegate {
         verificationCode: String
     ) async throws(Exception) -> String {
         guard Networking.isReadWriteEnabled else {
-            throw .Networking.readWriteAccessDisabled(.init(sender: self))
+            throw .Networking.readWriteAccessDisabled(
+                .init(sender: self)
+            )
         }
 
         guard isOnline else {
-            throw .internetConnectionOffline(metadata: .init(sender: self))
+            throw .internetConnectionOffline(
+                metadata: .init(sender: self)
+            )
         }
 
         Networking.config.activityIndicatorDelegate.show()
         defer { Networking.config.activityIndicatorDelegate.hide() }
 
-        let credential = phoneAuthProvider.credential(withVerificationID: authID, verificationCode: verificationCode)
+        let credential = phoneAuthProvider.credential(
+            withVerificationID: authID,
+            verificationCode: verificationCode
+        )
 
         do {
-            let signInResult = try await firebaseAuth.signIn(with: credential)
-            return signInResult.user.uid
+            return try await firebaseAuth
+                .signIn(with: credential)
+                .user
+                .uid
         } catch {
-            throw .init(error, metadata: .init(sender: self))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 
@@ -55,11 +67,15 @@ struct Auth: AuthDelegate {
         languageCode: String
     ) async throws(Exception) -> String {
         guard Networking.isReadWriteEnabled else {
-            throw .Networking.readWriteAccessDisabled(.init(sender: self))
+            throw .Networking.readWriteAccessDisabled(
+                .init(sender: self)
+            )
         }
 
         guard isOnline else {
-            throw .internetConnectionOffline(metadata: .init(sender: self))
+            throw .internetConnectionOffline(
+                metadata: .init(sender: self)
+            )
         }
 
         Networking.config.activityIndicatorDelegate.show()
@@ -69,9 +85,15 @@ struct Auth: AuthDelegate {
 
         let formattedNumber = "+\(internationalNumber.digits)"
         do {
-            return try await phoneAuthProvider.verifyPhoneNumber(formattedNumber, uiDelegate: nil)
+            return try await phoneAuthProvider.verifyPhoneNumber(
+                formattedNumber,
+                uiDelegate: nil
+            )
         } catch {
-            throw .init(error, metadata: .init(sender: self))
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 }

@@ -48,55 +48,27 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async throws(Exception) -> T {
-        let getValuesResult = await getValues(
-            at: path,
-            prependingEnvironment: prependingEnvironment,
-            cacheStrategy: cacheStrategy,
-            timeout: duration
-        )
-
-        switch getValuesResult {
-        case let .success(values):
-            guard let values = values as? T else {
-                throw .Networking.typecastFailed(
-                    String(T.self),
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return values
-
-        case let .failure(exception):
-            throw exception
-        }
-    }
-
-    private func getValues(
-        at path: String,
-        prependingEnvironment: Bool,
-        cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async -> Callback<Any, Exception> {
-        switch await coreDatabase.performOperation(
+        guard let values = try await coreDatabase.performOperation(
             .getValues(
                 atPath: path,
                 cacheStrategy: cacheStrategy
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(values):
-            guard let values else {
-                return .failure(.init(
-                    metadata: .init(sender: self)
-                ))
-            }
-
-            return .success(values)
-
-        case let .failure(exception):
-            return .failure(exception)
+        ) else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        guard let values = values as? T else {
+            throw .Networking.typecastFailed(
+                String(T.self),
+                metadata: .init(sender: self)
+            )
+        }
+
+        return values
     }
 
     func queryValues<T>(
@@ -106,38 +78,7 @@ struct Database: DatabaseDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration // swiftformat:disable all
     ) async throws(Exception) -> T { // swiftformat:enable all
-        let queryValuesResult = await queryValues(
-            at: path,
-            strategy: strategy,
-            prependingEnvironment: prependingEnvironment,
-            cacheStrategy: cacheStrategy,
-            timeout: duration
-        )
-
-        switch queryValuesResult {
-        case let .success(values):
-            guard let values = values as? T else {
-                throw .Networking.typecastFailed(
-                    String(T.self),
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return values
-
-        case let .failure(exception):
-            throw exception
-        }
-    }
-
-    private func queryValues(
-        at path: String,
-        strategy: QueryStrategy,
-        prependingEnvironment: Bool,
-        cacheStrategy: CacheStrategy,
-        timeout duration: Duration
-    ) async -> Callback<Any, Exception> {
-        switch await coreDatabase.performOperation(
+        guard let values = try await coreDatabase.performOperation(
             .queryValues(
                 atPath: path,
                 strategy: strategy,
@@ -145,19 +86,20 @@ struct Database: DatabaseDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(values):
-            guard let values else {
-                return .failure(.init(
-                    metadata: .init(sender: self)
-                ))
-            }
-
-            return .success(values)
-
-        case let .failure(exception):
-            return .failure(exception)
+        ) else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        guard let values = values as? T else {
+            throw .Networking.typecastFailed(
+                String(T.self),
+                metadata: .init(sender: self)
+            )
+        }
+
+        return values
     }
 
     // MARK: - Value Setting
@@ -175,7 +117,7 @@ struct Database: DatabaseDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 
     func updateChildValues(
@@ -191,7 +133,7 @@ struct Database: DatabaseDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 }
 

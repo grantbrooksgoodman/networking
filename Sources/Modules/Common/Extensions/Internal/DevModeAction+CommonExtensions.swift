@@ -25,8 +25,9 @@ extension DevModeAction {
                     Networking.config.setEnvironment(environment)
 
                     coreUtilities.clearCaches()
-                    coreUtilities.eraseDocumentsDirectory()
-                    coreUtilities.eraseTemporaryDirectory()
+                    try? coreUtilities.eraseApplicationSupportDirectory()
+                    try? coreUtilities.eraseDocumentsDirectory()
+                    try? coreUtilities.eraseTemporaryDirectory()
 
                     defaults.reset()
 

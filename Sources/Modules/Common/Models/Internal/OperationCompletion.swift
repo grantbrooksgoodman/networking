@@ -14,14 +14,14 @@ import AppSubsystem
 final class OperationCompletion: @unchecked Sendable {
     // MARK: - Properties
 
-    private let body: (Callback<Any?, Exception>) -> Void
+    private let body: (Result<Any?, Exception>) -> Void
 
     @LockIsolated private var didComplete = false
 
     // MARK: - Init
 
     init(
-        _ body: @escaping (Callback<Any?, Exception>) -> Void
+        _ body: @escaping (Result<Any?, Exception>) -> Void
     ) {
         self.body = body
         Networking.config.activityIndicatorDelegate.show()
@@ -29,7 +29,9 @@ final class OperationCompletion: @unchecked Sendable {
 
     // MARK: - Call as Function
 
-    func callAsFunction(_ result: Callback<Any?, Exception>) {
+    func callAsFunction(
+        _ result: Result<Any?, Exception>
+    ) {
         let shouldProceed = $didComplete.withValue {
             guard !$0 else { return false }
             $0 = true

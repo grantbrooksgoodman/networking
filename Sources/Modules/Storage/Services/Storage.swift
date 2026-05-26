@@ -43,7 +43,7 @@ struct Storage: StorageDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 
     // MARK: - Deletion
@@ -61,7 +61,7 @@ struct Storage: StorageDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 
     func deleteItem(
@@ -69,7 +69,7 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) {
-        _ = await coreStorage.performOperation(
+        _ = try await coreStorage.performOperation(
             .deleteItem(
                 atPath: path
             ),
@@ -98,7 +98,7 @@ struct Storage: StorageDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 
     func downloadItem(
@@ -116,7 +116,7 @@ struct Storage: StorageDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ).get()
+        )
     }
 
     // MARK: - Enumeration
@@ -126,25 +126,19 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> Set<String> {
-        switch await coreStorage.performOperation(
+        guard let emptyDirectories = try await coreStorage.performOperation(
             .enumerateEmptyDirectories(
                 startingAt: path
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(emptyDirectories):
-            guard let emptyDirectories = emptyDirectories as? Set<String> else {
-                throw .init(
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return emptyDirectories
-
-        case let .failure(exception):
-            throw exception
+        ) as? Set<String> else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        return emptyDirectories
     }
 
     func getDirectoryListing(
@@ -153,26 +147,20 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> DirectoryListing {
-        switch await coreStorage.performOperation(
+        guard let directoryListing = try await coreStorage.performOperation(
             .getDirectoryListing(
                 atPath: path,
                 firstResultOnly: firstResultOnly
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(directoryListing):
-            guard let directoryListing = directoryListing as? DirectoryListing else {
-                throw .init(
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return directoryListing
-
-        case let .failure(exception):
-            throw exception
+        ) as? DirectoryListing else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        return directoryListing
     }
 
     func itemExists(
@@ -182,7 +170,7 @@ struct Storage: StorageDelegate {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) async throws(Exception) -> Bool {
-        switch await coreStorage.performOperation(
+        guard let itemExists = try await coreStorage.performOperation(
             .itemExists(
                 asItemType: itemType,
                 atPath: path,
@@ -190,19 +178,13 @@ struct Storage: StorageDelegate {
             ),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(itemExists):
-            guard let itemExists = itemExists as? Bool else {
-                throw .init(
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return itemExists
-
-        case let .failure(exception):
-            throw exception
+        ) as? Bool else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        return itemExists
     }
 
     func sizeInKilobytes(
@@ -210,23 +192,17 @@ struct Storage: StorageDelegate {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> Int {
-        switch await coreStorage.performOperation(
+        guard let sizeInKilobytes = try await coreStorage.performOperation(
             .sizeInKilobytes(ofItemAtPath: path),
             prependingEnvironment: prependingEnvironment,
             timeout: duration
-        ) {
-        case let .success(sizeInKilobytes):
-            guard let sizeInKilobytes = sizeInKilobytes as? Int else {
-                throw .init(
-                    metadata: .init(sender: self)
-                )
-            }
-
-            return sizeInKilobytes
-
-        case let .failure(exception):
-            throw exception
+        ) as? Int else {
+            throw Exception(
+                metadata: .init(sender: self)
+            )
         }
+
+        return sizeInKilobytes
     }
 
     // MARK: - Clear Store
