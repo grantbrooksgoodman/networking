@@ -460,7 +460,7 @@ The generated signatures reference the serialization key enum by name. By defaul
 
 ```swift
 @Updatable(nilIf: .isBangQualifiedEmpty) let blockedUserIDs: [String]?
-@Updatable(nilIf: .custom("$0 == .init(timeIntervalSince1970: 0)")) let lastSignedIn: Date?
+@Updatable(nilIf: .custom("$0 == Date(timeIntervalSince1970: 0)")) let lastSignedIn: Date?
 ```
 
 > **Note:** The `.custom` case requires a string literal. The macro reads the expression from source at compile time, so passing a variable or computed property reference does not work.
@@ -604,18 +604,17 @@ Use [`TranslationValidator`](Sources/Modules/Translation/Models/Public/Translati
 On a cold start, the first database or storage operation may incur additional latency while the underlying connection to the backend is established. Both [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) and [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) provide a `prewarm()` method that begins connection setup in the background:
 
 ```swift
-@Dependency(\.networking.database) var database: DatabaseDelegate
-@Dependency(\.networking.storage) var storage: StorageDelegate
+@Dependency(\.networking) var networking: NetworkServices
 
-database.prewarm()
-storage.prewarm()
+networking.database.prewarm()
+networking.storage.prewarm()
 ```
 
 Both calls return immediately. Connection establishment proceeds in the background.
 
 ### Operation Coalescing
 
-The default database and storage implementations automatically coalesce identical concurrent operations. When multiple callers perform the same operation at the same time, only a single network request is made and all callers receive the same result. Two operations are considered identical when they share the same parameters – including path, cache strategy, and, for write operations, payload.
+The default database and storage implementations automatically coalesce identical concurrent operations. When multiple callers perform the same operation at the same time, only a single network request is made and all callers receive the same result. Two operations are considered identical when they share the same parameters – including path, cache strategy, and – for write operations – payload.
 
 This deduplication is transparent and requires no additional configuration.
 

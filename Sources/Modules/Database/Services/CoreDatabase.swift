@@ -37,13 +37,13 @@ import FirebaseDatabase
 public enum CoreDatabaseStore {
     // MARK: - Properties
 
-    private nonisolated(unsafe) static let _lock: UnsafeMutablePointer<os_unfair_lock> = {
+    private nonisolated(unsafe) static let lock: UnsafeMutablePointer<os_unfair_lock> = {
         let pointer = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
         pointer.initialize(to: os_unfair_lock())
         return pointer
     }()
 
-    private nonisolated(unsafe) static var _store = [String: DataSample]()
+    private nonisolated(unsafe) static var store = [String: DataSample]()
 
     // MARK: - Methods
 
@@ -57,9 +57,9 @@ public enum CoreDatabaseStore {
         _ value: DataSample,
         forKey key: String
     ) {
-        os_unfair_lock_lock(_lock)
-        _store[key] = value
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_lock(lock)
+        store[key] = value
+        os_unfair_lock_unlock(lock)
     }
 
     /// Stores multiple data samples in the cache in a
@@ -71,16 +71,16 @@ public enum CoreDatabaseStore {
         _ values: [String: DataSample]
     ) {
         guard !values.isEmpty else { return }
-        os_unfair_lock_lock(_lock)
-        _store.merge(values) { _, new in new }
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_lock(lock)
+        store.merge(values) { _, new in new }
+        os_unfair_lock_unlock(lock)
     }
 
     /// Removes all cached data samples from the store.
     public static func clearStore() {
-        os_unfair_lock_lock(_lock)
-        _store.removeAll()
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_lock(lock)
+        store.removeAll()
+        os_unfair_lock_unlock(lock)
     }
 
     /// Removes all data samples that do not satisfy the
@@ -92,9 +92,9 @@ public enum CoreDatabaseStore {
     public static func filter(
         _ isIncluded: (Dictionary<String, DataSample>.Element) -> Bool
     ) {
-        os_unfair_lock_lock(_lock)
-        _store = _store.filter { isIncluded($0) }
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_lock(lock)
+        store = store.filter { isIncluded($0) }
+        os_unfair_lock_unlock(lock)
     }
 
     /// Returns the cached data for the specified key, or
@@ -108,18 +108,18 @@ public enum CoreDatabaseStore {
     /// - Returns: The cached data, or `nil` if no valid
     ///   sample exists.
     public static func getValue(forKey key: String) -> Any? {
-        os_unfair_lock_lock(_lock)
+        os_unfair_lock_lock(lock)
 
-        guard let sample = _store[key],
+        guard let sample = store[key],
               !sample.isExpired,
               !(sample.data is NSNull) else {
-            _store[key] = nil
-            os_unfair_lock_unlock(_lock)
+            store[key] = nil
+            os_unfair_lock_unlock(lock)
             return nil
         }
 
         let data = sample.data
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_unlock(lock)
 
         Logger.log(
             "Returning stored value for data at path \"\(key)\".",
@@ -135,9 +135,9 @@ public enum CoreDatabaseStore {
     ///
     /// - Parameter key: The cache key to remove.
     public static func removeValue(forKey key: String) {
-        os_unfair_lock_lock(_lock)
-        _store[key] = nil
-        os_unfair_lock_unlock(_lock)
+        os_unfair_lock_lock(lock)
+        store[key] = nil
+        os_unfair_lock_unlock(lock)
     }
 }
 
