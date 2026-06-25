@@ -11,29 +11,40 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-/// An interface for authenticating users with phone number
-/// verification.
+/// An interface for managing user authentication.
 ///
-/// Adopt `AuthDelegate` to perform two-step phone
-/// authentication. First, request a verification code by
-/// calling
-/// ``verifyPhoneNumber(internationalNumber:languageCode:)``.
-/// Then, complete sign-in by passing the returned
-/// verification ID and the user-entered code to
-/// ``authenticateUser(authID:verificationCode:)``:
+/// `AuthDelegate` supports two authentication modes:
+///
+/// - **Anonymous sign-in.** Call
+///   ``signInAnonymously()`` at launch to establish a
+///   lightweight session that satisfies backend security
+///   rules before the user completes phone verification.
+///
+/// - **Phone verification.** Request a verification code
+///   by calling
+///   ``verifyPhoneNumber(internationalNumber:languageCode:)``,
+///   then complete sign-in by passing the returned
+///   verification ID and the user-entered code to
+///   ``authenticateUser(authID:verificationCode:)``:
 ///
 /// ```swift
+/// // 1. Establish an anonymous session at launch.
+/// _ = try await auth.signInAnonymously()
+///
+/// // 2. Later, verify the user's phone number.
 /// let authID = try await auth.verifyPhoneNumber(
 ///     internationalNumber: "15551234567"
 /// )
 ///
+/// // 3. Complete sign-in (links the phone credential
+/// //    to the anonymous session automatically).
 /// let userID = try await auth.authenticateUser(
 ///     authID: authID,
 ///     verificationCode: userEnteredCode
 /// )
 /// ```
 ///
-/// A default implementation backed by Firebase Phone
+/// A default implementation backed by Firebase
 /// Authentication is provided automatically. To supply a
 /// custom conformance, register it with
 /// ``Networking/Config/registerAuthDelegate(_:)``.
@@ -45,6 +56,14 @@ public protocol AuthDelegate {
     /// Call this method after the user receives and enters
     /// the verification code sent by
     /// ``verifyPhoneNumber(internationalNumber:languageCode:)``.
+    ///
+    /// When the current session is anonymous, the default
+    /// implementation links the phone credential to that
+    /// session, preserving the existing user identifier. If
+    /// the phone number is already associated with another
+    /// account, the method falls back to a standard sign-in
+    /// and returns the existing account's identifier
+    /// instead.
     ///
     /// - Parameters:
     ///   - authID: The verification ID returned by a prior
@@ -60,6 +79,29 @@ public protocol AuthDelegate {
         authID: String,
         verificationCode: String
     ) async throws(Exception) -> String
+
+    /// Establishes an anonymous authentication session.
+    ///
+    /// Call this method before the user completes phone
+    /// verification to obtain a valid session that satisfies
+    /// backend security rules. If a persisted session already
+    /// exists, the method returns its identifier without
+    /// creating a new one.
+    ///
+    /// - Returns: A string representing the user's ID.
+    ///
+    /// - Throws: An ``Exception`` if sign-in fails.
+    func signInAnonymously() async throws(Exception) -> String
+
+    /// Ends the current authentication session.
+    ///
+    /// Call this method to sign out the current user and
+    /// clear the persisted session. Subsequent requests to
+    /// the backend are unauthenticated until a new session
+    /// is established.
+    ///
+    /// - Throws: An ``Exception`` if sign-out fails.
+    func signOut() throws(Exception)
 
     /// Sends a verification code to the specified phone
     /// number.

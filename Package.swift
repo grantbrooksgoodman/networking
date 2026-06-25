@@ -37,6 +37,7 @@ let package = Package(
             name: "Networking",
             dependencies: [
                 .product(name: "AppSubsystem", package: "app-subsystem"),
+                .product(name: "FirebaseAppCheck", package: "firebase-ios-sdk"),
                 .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
                 .product(name: "FirebaseDatabase", package: "firebase-ios-sdk"),
                 .product(name: "FirebaseStorage", package: "firebase-ios-sdk"),

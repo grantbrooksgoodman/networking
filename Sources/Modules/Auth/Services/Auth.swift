@@ -21,6 +21,38 @@ struct Auth: AuthDelegate {
     @Dependency(\.build.isOnline) private var isOnline: Bool
     @Dependency(\.firebasePhoneAuthProvider) private var phoneAuthProvider: PhoneAuthProvider
 
+    // MARK: - Anonymous Sign-In
+
+    func signInAnonymously() async throws(Exception) -> String {
+        guard Networking.isReadWriteEnabled else {
+            throw .Networking.readWriteAccessDisabled(
+                .init(sender: self)
+            )
+        }
+
+        guard isOnline else {
+            throw .internetConnectionOffline(
+                metadata: .init(sender: self)
+            )
+        }
+
+        if let currentUser = firebaseAuth.currentUser {
+            return currentUser.uid
+        }
+
+        do {
+            return try await firebaseAuth
+                .signInAnonymously()
+                .user
+                .uid
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
+        }
+    }
+
     // MARK: - Authentication with Verification Code
 
     func authenticateUser(
@@ -48,11 +80,41 @@ struct Auth: AuthDelegate {
         )
 
         do {
+            if let currentUser = firebaseAuth.currentUser,
+               currentUser.isAnonymous {
+                return try await currentUser
+                    .link(with: credential)
+                    .user
+                    .uid
+            }
+
             return try await firebaseAuth
                 .signIn(with: credential)
                 .user
                 .uid
         } catch {
+            // If linking fails because the phone number
+            // already belongs to an existing account, fall
+            // back to a standard sign-in with the updated
+            // credential from the error.
+            let nsError = error as NSError
+            if nsError.code == AuthErrorCode.credentialAlreadyInUse.rawValue,
+               let updatedCredential = nsError.userInfo[
+                   AuthErrorUserInfoUpdatedCredentialKey
+               ] as? AuthCredential {
+                do {
+                    return try await firebaseAuth
+                        .signIn(with: updatedCredential)
+                        .user
+                        .uid
+                } catch {
+                    throw Exception(
+                        error,
+                        metadata: .init(sender: self)
+                    )
+                }
+            }
+
             throw Exception(
                 error,
                 metadata: .init(sender: self)
@@ -89,6 +151,19 @@ struct Auth: AuthDelegate {
                 formattedNumber,
                 uiDelegate: nil
             )
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
+        }
+    }
+
+    // MARK: - Sign-Out
+
+    func signOut() throws(Exception) {
+        do {
+            try firebaseAuth.signOut()
         } catch {
             throw Exception(
                 error,

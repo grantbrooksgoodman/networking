@@ -12,6 +12,7 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
+import FirebaseAppCheck
 import FirebaseCore
 
 // MARK: - Networking
@@ -94,16 +95,23 @@ public enum Networking {
     /// Configures the framework and prepares all
     /// internal services for use.
     ///
-    /// Call this method once at app launch. It
-    /// configures the Firebase backend, registers
-    /// Developer Mode actions, and begins monitoring
-    /// read/write enablement status.
+    /// Call this method once at app launch. It configures
+    /// Firebase App Check, initializes the Firebase
+    /// backend, registers Developer Mode actions, and
+    /// begins monitoring read/write enablement status.
+    ///
+    /// App Check uses App Attest on physical devices and
+    /// a debug provider in the simulator. The provider
+    /// factory is set before Firebase configuration so
+    /// that attestation is active for all subsequent
+    /// requests.
     ///
     /// - Important: This method must be called on the
     ///   main actor. Accessing ``config`` before calling
     ///   this method results in a fatal error.
     @MainActor
     public static func initialize() {
+        AppCheck.configure()
         FirebaseApp.configure()
         didInitialize = true
         DevModeService.insertAction(.switchEnvironmentAction, at: 0)
@@ -377,5 +385,25 @@ public extension Networking {
         public func registerStorageDelegate(_ storageDelegate: StorageDelegate) {
             register(storageDelegate: storageDelegate)
         }
+    }
+}
+
+private final class AppAttestAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+    func createProvider(
+        with app: FirebaseApp
+    ) -> (any AppCheckProvider)? {
+        AppAttestProvider(app: app)
+    }
+}
+
+private extension AppCheck {
+    static func configure() {
+        #if targetEnvironment(simulator)
+        let providerFactory = AppCheckDebugProviderFactory()
+        #else
+        let providerFactory = AppAttestAppCheckProviderFactory()
+        #endif
+
+        AppCheck.setAppCheckProviderFactory(providerFactory)
     }
 }
