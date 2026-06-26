@@ -11,13 +11,13 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-/// An interface for reading and writing data in the
-/// network database.
+/// An interface for reading, writing, and observing data
+/// in the network database.
 ///
 /// Use `DatabaseDelegate` to perform operations on the
 /// backend database. Values can be read, written, queried,
-/// and updated at key paths, with built-in caching and
-/// configurable timeouts:
+/// updated, and observed at key paths, with built-in
+/// caching and configurable timeouts:
 ///
 /// ```swift
 /// @Dependency(\.networking.database) var database: DatabaseDelegate
@@ -32,6 +32,13 @@ import AppSubsystem
 ///     "Jane",
 ///     forKey: "users/123/name"
 /// )
+///
+/// // Observe real-time changes at a path.
+/// for try await user: [String: Any] in database.observe(
+///     at: "users/123"
+/// ) {
+///     print(user)
+/// }
 /// ```
 ///
 /// By default, paths are prefixed with the active
@@ -99,6 +106,48 @@ public protocol DatabaseDelegate {
     /// - Returns: `true` if the value is encodable;
     ///   otherwise, `false`.
     func isEncodable(_ value: Any) -> Bool
+
+    /// Returns a stream that emits the value at the
+    /// specified path each time it changes.
+    ///
+    /// The returned stream attaches a real-time observer
+    /// to the database. Each time the value at `path`
+    /// changes, the new value is cast to type `T` and
+    /// emitted. The observer is automatically removed
+    /// when the consuming task is cancelled or the
+    /// iteration ends.
+    ///
+    /// Each emitted value also updates the in-memory
+    /// cache used by
+    /// ``getValues(at:prependingEnvironment:cacheStrategy:timeout:)``,
+    /// keeping point-read results consistent with
+    /// observed state.
+    ///
+    /// ```swift
+    /// let task = Task {
+    ///     for try await user: [String: Any] in database.observe(
+    ///         at: "users/123"
+    ///     ) {
+    ///         print(user)
+    ///     }
+    /// }
+    ///
+    /// // To stop observing:
+    /// task.cancel()
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - path: The database path to observe.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path.
+    ///
+    /// - Returns: An asynchronous throwing stream that
+    ///   emits values of type `T` as they change.
+    func observe<T>(
+        at path: String,
+        prependingEnvironment: Bool
+    ) -> AsyncThrowingStream<T, any Error>
 
     /// Establishes the underlying connection to the
     /// database without performing a data operation.
@@ -240,6 +289,31 @@ public extension DatabaseDelegate {
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
             timeout: duration
+        )
+    }
+
+    /// Returns a stream that emits the value at the
+    /// specified path each time it changes.
+    ///
+    /// This method calls
+    /// ``observe(at:prependingEnvironment:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - path: The database path to observe.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path. The default is `true`.
+    ///
+    /// - Returns: An asynchronous throwing stream that
+    ///   emits values of type `T` as they change.
+    func observe<T>(
+        at path: String,
+        prependingEnvironment: Bool = true
+    ) -> AsyncThrowingStream<T, any Error> {
+        observe(
+            at: path,
+            prependingEnvironment: prependingEnvironment
         )
     }
 
