@@ -236,6 +236,83 @@ final class CoreDatabase: @unchecked Sendable {
         return !compiled.allSatisfy { $0 == nil }
     }
 
+    // MARK: - Observation
+
+    func observe(
+        at path: String,
+        prependingEnvironment: Bool
+    ) -> AsyncThrowingStream<Any, any Error> {
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+        let (stream, continuation) = AsyncThrowingStream<Any, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        guard Networking.isReadWriteEnabled else {
+            continuation.finish(
+                throwing: Exception.Networking.readWriteAccessDisabled(
+                    .init(sender: self)
+                )
+            )
+            return stream
+        }
+
+        Logger.log(
+            "Started observing values at path \"\(path)\".",
+            domain: .Networking.database,
+            sender: self
+        )
+
+        let databaseReference = firebaseDatabase.child(path)
+        let observerHandle = databaseReference.observe(.value) { snapshot in
+            guard !self.isEmpty(snapshot.value),
+                  let value = snapshot.value else {
+                return continuation.finish(
+                    throwing: Exception(
+                        "No value exists at the specified key path.",
+                        userInfo: ["Path": path],
+                        metadata: .init(sender: self)
+                    )
+                )
+            }
+
+            CoreDatabaseStore.addValue(
+                .init(
+                    data: value,
+                    expiresAfter: .milliseconds(
+                        Networking.cacheExpiryMilliseconds(for: .now)
+                    )
+                ),
+                forKey: path
+            )
+
+            continuation.yield(value)
+        } withCancel: { error in
+            continuation.finish(
+                throwing: Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            )
+        }
+
+        let _databaseReference = LockIsolated(databaseReference)
+        continuation.onTermination = { _ in
+            Logger.log(
+                "Stopped observing values at path \"\(path)\".",
+                domain: .Networking.database,
+                sender: self
+            )
+
+            _databaseReference
+                .wrappedValue
+                .removeObserver(
+                    withHandle: observerHandle
+                )
+        }
+
+        return stream
+    }
+
     // MARK: - Perform Operation
 
     func performOperation(
@@ -381,7 +458,9 @@ final class CoreDatabase: @unchecked Sendable {
             CoreDatabaseStore.addValue(
                 .init(
                     data: values,
-                    expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: getValuesStartDate))
+                    expiresAfter: .milliseconds(
+                        Networking.cacheExpiryMilliseconds(for: getValuesStartDate)
+                    )
                 ),
                 forKey: path
             )
@@ -540,7 +619,9 @@ final class CoreDatabase: @unchecked Sendable {
         CoreDatabaseStore.addValue(
             .init(
                 data: value,
-                expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: .now))
+                expiresAfter: .milliseconds(
+                    Networking.cacheExpiryMilliseconds(for: .now)
+                )
             ),
             forKey: key
         )
@@ -579,7 +660,9 @@ final class CoreDatabase: @unchecked Sendable {
         CoreDatabaseStore.addValue(
             .init(
                 data: data,
-                expiresAfter: .milliseconds(Networking.cacheExpiryMilliseconds(for: .now))
+                expiresAfter: .milliseconds(
+                    Networking.cacheExpiryMilliseconds(for: .now)
+                )
             ),
             forKey: key
         )
