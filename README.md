@@ -46,7 +46,7 @@ Networking is organized around six modules, each focused on a specific backend s
 
 - **Common.** Shared protocols, models, and extensions used across all modules – including cache strategies, environment management, serialization, and the network activity indicator.
 
-- **Database.** Key-path-based reading, writing, and querying of structured data, backed by Firebase Realtime Database. Operations support configurable caching, timeouts, and environment-scoped paths.
+- **Database.** Key-path-based reading, writing, querying, and real-time observation of structured data, backed by Firebase Realtime Database. Operations support configurable caching, timeouts, and environment-scoped paths.
 
 - **Gemini.** AI-enhanced translation powered by the Gemini API, with configurable models, token limits, and contextual prompts.
 
@@ -501,7 +501,7 @@ ContentView()
 
 ### Database
 
-The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, and updated. All operations use typed throws – they return their result directly (when applicable) and throw an `Exception` on failure:
+The [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) protocol provides key-path-based access to the backend database. Values can be read, written, queried, updated, and observed in real time. All operations use typed throws – they return their result directly (when applicable) and throw an `Exception` on failure:
 
 ```swift
 @Dependency(\.networking.database) var database: DatabaseDelegate
@@ -527,6 +527,28 @@ let messages: [String: Any] = try await database.queryValues(
 Specify the expected return type using a variable annotation so the compiler can determine `T`.
 
 > **Important:** The type cast is performed at runtime. If the value stored at the path does not match the inferred type, the method throws a typecast exception. Ensure that the expected type matches the shape of your stored data.
+
+#### Real-Time Observation
+
+Use `observe(path:)` to receive a stream of values as they change at a given path. The method returns an `AsyncThrowingStream` that emits the current value immediately and again each time it changes on the server:
+
+```swift
+let task = Task {
+    for try await user: [String: Any] in database.observe(
+        path: "users/123"
+    ) {
+        print(user)
+    }
+}
+```
+
+The observer is automatically removed when the consuming task is cancelled or the iteration ends — no manual cleanup is required. To stop observing, cancel the task:
+
+```swift
+task.cancel()
+```
+
+Each observed value updates the in-memory cache used by `getValues(at:)`, keeping point-read results consistent with observed state.
 
 #### Cache Strategy
 

@@ -37,14 +37,36 @@ struct Auth: AuthDelegate {
         }
 
         if let currentUser = firebaseAuth.currentUser {
+            Logger.log(
+                .init(
+                    "Using persisted user ID for anonymous sign-in.",
+                    isReportable: false,
+                    userInfo: ["CurrentUserID": currentUser.uid],
+                    metadata: .init(sender: self)
+                ),
+                domain: .Networking.auth
+            )
+
             return currentUser.uid
         }
 
         do {
-            return try await firebaseAuth
+            let userID = try await firebaseAuth
                 .signInAnonymously()
                 .user
                 .uid
+
+            Logger.log(
+                .init(
+                    "Signed in as anonymous user.",
+                    isReportable: false,
+                    userInfo: ["AnonymousUserID": userID],
+                    metadata: .init(sender: self)
+                ),
+                domain: .Networking.auth
+            )
+
+            return userID
         } catch {
             throw Exception(
                 error,
@@ -55,6 +77,7 @@ struct Auth: AuthDelegate {
 
     // MARK: - Authentication with Verification Code
 
+    // TODO: Add Logger statements to the pertinent parts of this method.
     func authenticateUser(
         authID: String,
         verificationCode: String
@@ -164,6 +187,11 @@ struct Auth: AuthDelegate {
     func signOut() throws(Exception) {
         do {
             try firebaseAuth.signOut()
+            Logger.log(
+                "Signed out current user.",
+                domain: .Networking.auth,
+                sender: self
+            )
         } catch {
             throw Exception(
                 error,

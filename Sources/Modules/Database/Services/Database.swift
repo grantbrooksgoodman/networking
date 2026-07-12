@@ -22,16 +22,66 @@ struct Database: DatabaseDelegate {
         coreDatabase.isEncodable(value)
     }
 
+    // MARK: - Global Cache Strategy
+
+    func setGlobalCacheStrategy(_ globalCacheStrategy: CacheStrategy?) {
+        coreDatabase.setGlobalCacheStrategy(globalCacheStrategy)
+    }
+
     // MARK: - ID Key Generation
 
     func generateKey(for path: String) -> String? {
         coreDatabase.generateKey(for: path)
     }
 
-    // MARK: - Global Cache Strategy
+    // MARK: - Observation
 
-    func setGlobalCacheStrategy(_ globalCacheStrategy: CacheStrategy?) {
-        coreDatabase.setGlobalCacheStrategy(globalCacheStrategy)
+    func observe<T>(
+        path: String,
+        prependingEnvironment: Bool
+    ) -> AsyncThrowingStream<T, any Error> {
+        let rawStream = coreDatabase.observe(
+            path: path,
+            prependingEnvironment: prependingEnvironment
+        )
+
+        let (stream, continuation) = AsyncThrowingStream<T, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        let task = Task {
+            do {
+                for try await value in rawStream {
+                    guard let value = value as? T else {
+                        return continuation.finish(
+                            throwing: Exception.Networking.typecastFailed(
+                                String(T.self),
+                                metadata: .init(sender: self)
+                            )
+                        )
+                    }
+
+                    continuation.yield(LockIsolated(value).wrappedValue)
+                }
+
+                continuation.finish()
+            } catch let error as Exception {
+                continuation.finish(throwing: error)
+            } catch {
+                continuation.finish(
+                    throwing: Exception(
+                        error,
+                        metadata: .init(sender: self)
+                    )
+                )
+            }
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
     }
 
     // MARK: - Prewarming

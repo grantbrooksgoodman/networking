@@ -22,6 +22,6 @@ extension Networking {
             ).nanosecond ?? 0
         ) / 1_000_000
 
-        return milliseconds < 100 ? 100 + milliseconds : milliseconds
+        return milliseconds < 250 ? 250 + milliseconds : milliseconds
     }
 }
