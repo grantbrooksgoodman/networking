@@ -236,6 +236,88 @@ final class CoreDatabase: @unchecked Sendable {
         return !compiled.allSatisfy { $0 == nil }
     }
 
+    // MARK: - Atomic Increment
+
+    func increment(
+        at path: String,
+        by delta: Int,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async throws(Exception) {
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+
+        guard Networking.isReadWriteEnabled else {
+            throw .Networking.readWriteAccessDisabled(
+                .init(sender: self)
+            )
+        }
+
+        guard isOnline else {
+            throw .internetConnectionOffline(
+                metadata: .init(sender: self)
+            )
+        }
+
+        Logger.log(
+            "Incrementing value at path \"\(path)\" by \(delta).",
+            domain: .Networking.database,
+            sender: self
+        )
+
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                @LockIsolated var didResume = false
+                var canResume: Bool {
+                    $didResume.withValue {
+                        guard !$0 else { return false }
+                        $0 = true
+                        return true
+                    }
+                }
+
+                let timeout = Timeout(after: duration) {
+                    guard canResume else { return }
+                    continuation.resume(
+                        throwing: Exception.timedOut(
+                            metadata: .init(sender: self)
+                        )
+                    )
+                }
+
+                firebaseDatabase.child(path).setValue(
+                    ServerValue.increment(NSNumber(value: delta)),
+                    withCompletionBlock: { error, _ in
+                        timeout.cancel()
+                        guard canResume else { return }
+
+                        if let error {
+                            continuation.resume(
+                                throwing: Exception(
+                                    error,
+                                    metadata: .init(sender: self)
+                                )
+                            )
+                        } else {
+                            continuation.resume()
+                        }
+                    }
+                )
+            }
+        } catch let error as Exception {
+            throw error
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
+        }
+
+        // Server-side increment produces an unknown local
+        // result; invalidate the cache so the next read
+        // fetches fresh.
+        CoreDatabaseStore.removeValue(forKey: path)
+    }
+
     // MARK: - Observation
 
     func observe(
@@ -427,6 +509,102 @@ final class CoreDatabase: @unchecked Sendable {
                 timeout.cancel()
                 completion(.failure(error))
             }
+        }
+    }
+
+    // MARK: - Transaction
+
+    // swiftlint:disable:next function_body_length
+    func runTransaction(
+        at path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration,
+        _ block: @Sendable @escaping (Any?) -> Any?
+    ) async throws(Exception) -> Any? {
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+
+        guard Networking.isReadWriteEnabled else {
+            throw .Networking.readWriteAccessDisabled(
+                .init(sender: self)
+            )
+        }
+
+        guard isOnline else {
+            throw .internetConnectionOffline(
+                metadata: .init(sender: self)
+            )
+        }
+
+        Logger.log(
+            "Running transaction at path \"\(path)\".",
+            domain: .Networking.database,
+            sender: self
+        )
+
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                @LockIsolated var didResume = false
+                var canResume: Bool {
+                    $didResume.withValue {
+                        guard !$0 else { return false }
+                        $0 = true
+                        return true
+                    }
+                }
+
+                let timeout = Timeout(after: duration) {
+                    guard canResume else { return }
+                    continuation.resume(
+                        throwing: Exception.timedOut(
+                            metadata: .init(sender: self)
+                        )
+                    )
+                }
+
+                firebaseDatabase.child(path).runTransactionBlock { mutableData in
+                    let currentValue = self.isEmpty(mutableData.value) ? nil : mutableData.value
+                    mutableData.value = block(currentValue) as Any
+                    return .success(withValue: mutableData)
+                } andCompletionBlock: { error, _, snapshot in
+                    timeout.cancel()
+                    guard canResume else { return }
+
+                    if let error {
+                        continuation.resume(
+                            throwing: Exception(
+                                error,
+                                metadata: .init(sender: self)
+                            )
+                        )
+
+                        return
+                    }
+
+                    let committedValue = self.isEmpty(snapshot?.value) ? nil : snapshot?.value
+                    if let committedValue {
+                        CoreDatabaseStore.addValue(
+                            .init(
+                                data: committedValue,
+                                expiresAfter: .milliseconds(
+                                    Networking.cacheExpiryMilliseconds(for: .now)
+                                )
+                            ),
+                            forKey: path
+                        )
+                    } else {
+                        CoreDatabaseStore.removeValue(forKey: path)
+                    }
+
+                    continuation.resume(returning: committedValue)
+                }
+            }
+        } catch let error as Exception {
+            throw error
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
         }
     }
 
@@ -657,15 +835,34 @@ final class CoreDatabase: @unchecked Sendable {
             )
         }
 
-        CoreDatabaseStore.addValue(
-            .init(
-                data: data,
-                expiresAfter: .milliseconds(
-                    Networking.cacheExpiryMilliseconds(for: .now)
+        // When data keys contain "/" the payload is a multi-path
+        // update (e.g. a fan-out anchored at the environment root).
+        // Caching the partial dict at the anchor key would poison
+        // reads for the entire subtree. Cache each resolved leaf
+        // path individually instead.
+        let isMultiPath = data.keys.contains(where: { $0.contains("/") })
+        if isMultiPath {
+            let expiryMilliseconds = Networking.cacheExpiryMilliseconds(for: .now)
+            var resolved = [String: DataSample]()
+            for (childKey, value) in data where !(value is NSNull) {
+                resolved["\(key)/\(childKey)"] = .init(
+                    data: value,
+                    expiresAfter: .milliseconds(expiryMilliseconds)
                 )
-            ),
-            forKey: key
-        )
+            }
+
+            CoreDatabaseStore.addValues(resolved)
+        } else {
+            CoreDatabaseStore.addValue(
+                .init(
+                    data: data,
+                    expiresAfter: .milliseconds(
+                        Networking.cacheExpiryMilliseconds(for: .now)
+                    )
+                ),
+                forKey: key
+            )
+        }
 
         return nil
     }

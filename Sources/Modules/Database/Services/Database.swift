@@ -16,6 +16,22 @@ struct Database: DatabaseDelegate {
 
     @Dependency(\.coreDatabase) private var coreDatabase: CoreDatabase
 
+    // MARK: - Atomic Increment
+
+    func increment(
+        at path: String,
+        by delta: Int,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async throws(Exception) {
+        try await coreDatabase.increment(
+            at: path,
+            by: delta,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
     // MARK: - Data Integrity Validation
 
     func isEncodable(_ value: Any) -> Bool {
@@ -88,6 +104,23 @@ struct Database: DatabaseDelegate {
 
     func prewarm() {
         coreDatabase.prewarm()
+    }
+
+    // MARK: - Transaction
+
+    @discardableResult
+    func runTransaction(
+        at path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration,
+        _ block: @Sendable @escaping (Any?) -> Any?
+    ) async throws(Exception) -> Any? {
+        try await coreDatabase.runTransaction(
+            at: path,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration,
+            block
+        )
     }
 
     // MARK: - Value Retrieval

@@ -93,6 +93,33 @@ public protocol DatabaseDelegate {
         timeout duration: Duration
     ) async throws(Exception) -> T
 
+    /// Atomically increments a numeric value at the
+    /// specified path by the given delta.
+    ///
+    /// The increment is performed entirely on the server
+    /// using a single atomic operation. No local read is
+    /// required, so concurrent increments from multiple
+    /// clients never conflict.
+    ///
+    /// - Parameters:
+    ///   - path: The database path containing the numeric
+    ///     value to increment.
+    ///   - delta: The integer amount to add to the current
+    ///     value.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Throws: An ``Exception`` if the increment fails.
+    func increment(
+        at path: String,
+        by delta: Int,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async throws(Exception)
+
     /// Returns a Boolean value that indicates whether
     /// the specified value can be stored in the database.
     ///
@@ -189,6 +216,43 @@ public protocol DatabaseDelegate {
         timeout duration: Duration
     ) async throws(Exception) -> T
 
+    /// Executes a transaction at the specified path.
+    ///
+    /// A transaction reads the current value at the path,
+    /// passes it to the provided block, and attempts to
+    /// commit the block's return value. If the value
+    /// changes between the read and the commit, the
+    /// transaction retries automatically until it succeeds
+    /// or reaches the maximum retry count.
+    ///
+    /// Each transaction bypasses operation coalescing —
+    /// concurrent transactions are always executed
+    /// independently.
+    ///
+    /// - Parameters:
+    ///   - path: The database path to run the transaction
+    ///     against.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///   - block: A closure that receives the current
+    ///     value and returns the new value to commit.
+    ///
+    /// - Returns: The committed value, or `nil` if the
+    ///   transaction committed a deletion.
+    ///
+    /// - Throws: An ``Exception`` if the transaction
+    ///   fails.
+    @discardableResult
+    func runTransaction(
+        at path: String,
+        prependingEnvironment: Bool,
+        timeout duration: Duration,
+        _ block: @Sendable @escaping (Any?) -> Any?
+    ) async throws(Exception) -> Any?
+
     /// Overrides the cache strategy for all database
     /// operations.
     ///
@@ -254,6 +318,57 @@ public protocol DatabaseDelegate {
 }
 
 public extension DatabaseDelegate {
+    /// Atomically writes a set of values across multiple
+    /// database paths in a single operation.
+    ///
+    /// Use this method to perform fan-out writes — updates
+    /// that touch several paths simultaneously. All paths
+    /// in `updates` are written atomically: either every
+    /// path is updated or none are.
+    ///
+    /// Each key in `updates` is a slash-separated path
+    /// relative to the active environment (for example,
+    /// `"conversations/<key>/hash"`). Pass `NSNull()` as a
+    /// value to delete the entry at a path.
+    ///
+    /// ```swift
+    /// try await database.commit([
+    ///     "users/123/name": "Jane",
+    ///     "conversations/abc/hash": updatedHash,
+    /// ])
+    /// ```
+    ///
+    /// - Parameter updates: A dictionary whose keys are
+    ///   environment-relative paths and whose values are the
+    ///   data to write. Use `NSNull()` to delete a path.
+    ///
+    /// - Throws: An ``Exception`` if the write fails or if
+    ///   `updates` contains overlapping paths.
+    func commit(
+        _ updates: [String: Any]
+    ) async throws(Exception) {
+        guard !updates.isEmpty else { return }
+
+        let sortedKeys = updates.keys.sorted()
+        for index in sortedKeys.indices.dropLast() {
+            let currentKey = sortedKeys[index]
+            let nextKey = sortedKeys[index + 1]
+
+            if nextKey.hasPrefix("\(currentKey)/") {
+                throw Exception(
+                    "Overlapping fan-out paths: \"\(currentKey)\" is a prefix of \"\(nextKey)\".",
+                    metadata: .init(sender: self)
+                )
+            }
+        }
+
+        try await updateChildValues(
+            forKey: Networking.config.environment.shortString,
+            with: updates,
+            prependingEnvironment: false
+        )
+    }
+
     /// Reads the value stored at the specified path as the
     /// inferred type.
     ///
@@ -288,6 +403,40 @@ public extension DatabaseDelegate {
             at: path,
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+    }
+
+    /// Atomically increments a numeric value at the
+    /// specified path by the given delta.
+    ///
+    /// This method calls
+    /// ``increment(at:by:prependingEnvironment:timeout:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - path: The database path containing the numeric
+    ///     value to increment.
+    ///   - delta: The integer amount to add to the current
+    ///     value.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path. The default is `true`.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Throws: An ``Exception`` if the increment fails.
+    func increment(
+        at path: String,
+        by delta: Int,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10)
+    ) async throws(Exception) {
+        try await increment(
+            at: path,
+            by: delta,
+            prependingEnvironment: prependingEnvironment,
             timeout: duration
         )
     }
@@ -357,6 +506,44 @@ public extension DatabaseDelegate {
             prependingEnvironment: prependingEnvironment,
             cacheStrategy: cacheStrategy,
             timeout: duration
+        )
+    }
+
+    /// Executes a transaction at the specified path.
+    ///
+    /// This method calls
+    /// ``runTransaction(at:prependingEnvironment:timeout:_:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - path: The database path to run the transaction
+    ///     against.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path. The default is `true`.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///   - block: A closure that receives the current
+    ///     value and returns the new value to commit.
+    ///
+    /// - Returns: The committed value, or `nil` if the
+    ///   transaction committed a deletion.
+    ///
+    /// - Throws: An ``Exception`` if the transaction
+    ///   fails.
+    @discardableResult
+    func runTransaction(
+        at path: String,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = .seconds(10),
+        _ block: @Sendable @escaping (Any?) -> Any?
+    ) async throws(Exception) -> Any? {
+        try await runTransaction(
+            at: path,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration,
+            block
         )
     }
 
