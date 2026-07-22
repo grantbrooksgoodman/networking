@@ -18,6 +18,7 @@ public enum NetworkServicesDependency: DependencyKey {
         .init(
             auth: Networking.config.authDelegate,
             database: Networking.config.databaseDelegate,
+            health: Networking.config.healthDelegate,
             hostedTranslation: Networking.config.hostedTranslationDelegate,
             storage: Networking.config.storageDelegate
         )

@@ -61,6 +61,70 @@ enum StorageOperation: EncodedHashable {
         metadata: HostedItemMetadata
     )
 
+    // MARK: - Methods
+
+    /// Returns a copy with any ``CacheStrategy/adaptive``
+    /// cache strategy resolved to a concrete value based
+    /// on the current network health.
+    func resolvingAdaptiveCacheStrategy() -> StorageOperation {
+        switch self {
+        case let .downloadAllItems(
+            atPath: path,
+            toDirectory: directory,
+            includeItemsInSubdirectories: includeSubdirs,
+            cacheStrategy: cacheStrategy
+        ):
+            guard cacheStrategy == .adaptive else { return self }
+            return .downloadAllItems(
+                atPath: path,
+                toDirectory: directory,
+                includeItemsInSubdirectories: includeSubdirs,
+                cacheStrategy: NetworkHealthResolver.resolve(
+                    health: Networking.config.healthDelegate.health,
+                    configuration: Networking.config.networkHealthConfiguration
+                )
+            )
+
+        case let .downloadItem(
+            atPath: path,
+            toLocalPath: localPath,
+            cacheStrategy: cacheStrategy
+        ):
+            guard cacheStrategy == .adaptive else { return self }
+            return .downloadItem(
+                atPath: path,
+                toLocalPath: localPath,
+                cacheStrategy: NetworkHealthResolver.resolve(
+                    health: Networking.config.healthDelegate.health,
+                    configuration: Networking.config.networkHealthConfiguration
+                )
+            )
+
+        case let .itemExists(
+            asItemType: itemType,
+            atPath: path,
+            cacheStrategy: cacheStrategy
+        ):
+            guard cacheStrategy == .adaptive else { return self }
+            return .itemExists(
+                asItemType: itemType,
+                atPath: path,
+                cacheStrategy: NetworkHealthResolver.resolve(
+                    health: Networking.config.healthDelegate.health,
+                    configuration: Networking.config.networkHealthConfiguration
+                )
+            )
+
+        case .deleteAllItems,
+             .deleteItem,
+             .enumerateEmptyDirectories,
+             .getDirectoryListing,
+             .sizeInKilobytes,
+             .upload:
+            return self
+        }
+    }
+
     // MARK: - Properties
 
     var hashFactors: [String] {

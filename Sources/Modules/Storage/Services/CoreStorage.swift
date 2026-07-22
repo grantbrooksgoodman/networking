@@ -68,12 +68,17 @@ final class CoreStorage: @unchecked Sendable {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> Any? {
-        try await Self.coalescer(
+        let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
+        let resolvedGlobalRawValue = globalCacheStrategy.map {
+            Self.resolvedStrategy($0).rawValue
+        } ?? ""
+
+        return try await Self.coalescer(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
-                operation.encodedHash
-                    + (globalCacheStrategy?.rawValue ?? "")
+                resolvedOperation.encodedHash
+                    + resolvedGlobalRawValue
                     + prependingEnvironment.description
                     + duration.description
             ).encodedHash
@@ -87,7 +92,7 @@ final class CoreStorage: @unchecked Sendable {
 
             return await withCheckedContinuation { continuation in
                 self._performOperation(
-                    operation,
+                    resolvedOperation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
                 ) { result in
@@ -156,7 +161,7 @@ final class CoreStorage: @unchecked Sendable {
                         at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                         toDirectory: localDirectory,
                         includeItemsInSubdirectories: includeItemsInSubdirectories,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
                     )
 
                 case let .downloadItem(
@@ -167,7 +172,7 @@ final class CoreStorage: @unchecked Sendable {
                     try await downloadItem(
                         at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                         to: localPath,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
                     )
 
                 case let .enumerateEmptyDirectories(
@@ -194,7 +199,7 @@ final class CoreStorage: @unchecked Sendable {
                     try await itemExists(
                         as: itemType,
                         at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
                     )
 
                 case let .sizeInKilobytes(
@@ -240,6 +245,8 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[metadata.filePath] = nil
         $storedItemExistsResults[metadata.filePath] = nil
 
+        let healthStartTime = Date.now
+
         do {
             _ = try await firebaseStorage.putDataAsync(
                 data,
@@ -253,6 +260,13 @@ final class CoreStorage: @unchecked Sendable {
                 metadata: .init(sender: self)
             )
         }
+
+        let elapsed = Date.now.timeIntervalSince(healthStartTime)
+
+        Networking.config.healthDelegate.recordThroughputSample(
+            bytes: data.count,
+            seconds: elapsed
+        )
 
         return nil
     }
@@ -530,6 +544,8 @@ final class CoreStorage: @unchecked Sendable {
         at path: String,
         to localPath: URL
     ) async throws(Exception) {
+        let healthStartTime = Date.now
+
         do {
             _ = try await firebaseStorage
                 .child(path)
@@ -540,6 +556,17 @@ final class CoreStorage: @unchecked Sendable {
             throw Exception(
                 error,
                 metadata: .init(sender: self)
+            )
+        }
+
+        let elapsed = Date.now.timeIntervalSince(healthStartTime)
+
+        if let fileSize = try? fileManager.attributesOfItem(
+            atPath: localPath.path()
+        )[.size] as? Int {
+            Networking.config.healthDelegate.recordThroughputSample(
+                bytes: fileSize,
+                seconds: elapsed
             )
         }
     }
@@ -825,6 +852,14 @@ final class CoreStorage: @unchecked Sendable {
         )
 
         return true
+    }
+
+    private static func resolvedStrategy(_ strategy: CacheStrategy) -> CacheStrategy {
+        guard strategy == .adaptive else { return strategy }
+        return NetworkHealthResolver.resolve(
+            health: Networking.config.healthDelegate.health,
+            configuration: Networking.config.networkHealthConfiguration
+        )
     }
 
     private func storedItemExistsResultIsValid(

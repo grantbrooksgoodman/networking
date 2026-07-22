@@ -81,6 +81,17 @@ public enum Networking {
     /// called.
     public static let config = Config.shared
 
+    /// The default timeout duration applied to database and
+    /// storage operations when no explicit value is provided.
+    ///
+    /// This constant is the single source of truth for the
+    /// hard-coded ten-second default that appears across all
+    /// ``DatabaseDelegate`` and ``StorageDelegate`` convenience
+    /// overloads.
+    public static var defaultOperationTimeout: Duration {
+        .seconds(10)
+    }
+
     private static let _didInitialize = LockIsolated(false)
 
     /* MARK: Computed Properties */
@@ -116,6 +127,11 @@ public enum Networking {
         didInitialize = true
         DevModeService.insertAction(.switchEnvironmentAction, at: 0)
         DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 1)
+        DevModeService.insertAction(.inspectNetworkHealthAction, at: 2)
+
+        Task.background {
+            config.healthDelegate.startMonitoring()
+        }
 
         Task.background { @MainActor in
             ReadWriteEnablementStatusService.shared.listenForReadWriteEnablementStatusChanges()
@@ -137,7 +153,7 @@ public extension Networking {
     ///
     /// Delegates with sensible defaults are provided
     /// automatically. To supply a custom conformance,
-    /// use ``register(activityIndicatorDelegate:authDelegate:databaseDelegate:geminiAPIKeyDelegate:hostedTranslationDelegate:storageDelegate:)``
+    /// use ``register(activityIndicatorDelegate:authDelegate:databaseDelegate:geminiAPIKeyDelegate:healthDelegate:hostedTranslationDelegate:storageDelegate:)``
     /// or one of the individual registration methods:
     ///
     /// ```swift
@@ -166,11 +182,13 @@ public extension Networking {
         @LockIsolated package private(set) var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         @LockIsolated package private(set) var authDelegate: AuthDelegate = Auth()
         @LockIsolated package private(set) var databaseDelegate: DatabaseDelegate = Database()
+        @LockIsolated package private(set) var healthDelegate: NetworkHealthDelegate = NetworkHealthService.shared
         @LockIsolated package private(set) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
         @LockIsolated package private(set) var storageDelegate: StorageDelegate = Storage()
 
         private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(nil)
         private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(nil)
+        private let _networkHealthConfiguration = LockIsolated<NetworkHealthConfiguration>(.default)
 
         /* MARK: Computed Properties */
 
@@ -204,6 +222,21 @@ public extension Networking {
 
         package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate? {
             _geminiAPIKeyDelegate.wrappedValue
+        }
+
+        /// The active network health estimation
+        /// configuration.
+        ///
+        /// This value controls the scoring parameters
+        /// used by the health estimator, including
+        /// channel weights, ramp anchors, and tier
+        /// boundaries. The default configuration is
+        /// suitable for most use cases.
+        ///
+        /// To change this value, call
+        /// ``setNetworkHealthConfiguration(_:)``.
+        public var networkHealthConfiguration: NetworkHealthConfiguration {
+            _networkHealthConfiguration.wrappedValue
         }
 
         /* MARK: Init */
@@ -260,6 +293,15 @@ public extension Networking {
             self.isEnhancedDialogTranslationEnabled = isEnhancedDialogTranslationEnabled
         }
 
+        /// Sets the network health estimation
+        /// configuration.
+        ///
+        /// - Parameter networkHealthConfiguration: The
+        ///   configuration to use.
+        public func setNetworkHealthConfiguration(_ networkHealthConfiguration: NetworkHealthConfiguration) {
+            _networkHealthConfiguration.wrappedValue = networkHealthConfiguration
+        }
+
         /* MARK: Delegate Registration */
 
         /// Registers one or more custom delegates in a
@@ -290,6 +332,8 @@ public extension Networking {
         ///     delegate.
         ///   - geminiAPIKeyDelegate: A custom Gemini
         ///     API key delegate.
+        ///   - healthDelegate: A custom network health
+        ///     delegate.
         ///   - hostedTranslationDelegate: A custom
         ///     hosted translation delegate.
         ///   - storageDelegate: A custom storage
@@ -303,6 +347,7 @@ public extension Networking {
             authDelegate: AuthDelegate? = nil,
             databaseDelegate: DatabaseDelegate? = nil,
             geminiAPIKeyDelegate: GeminiAPIKeyDelegate? = nil,
+            healthDelegate: NetworkHealthDelegate? = nil,
             hostedTranslationDelegate: HostedTranslationDelegate? = nil,
             storageDelegate: StorageDelegate? = nil
         ) {
@@ -310,6 +355,7 @@ public extension Networking {
                 authDelegate != nil ||
                 databaseDelegate != nil ||
                 geminiAPIKeyDelegate != nil ||
+                healthDelegate != nil ||
                 hostedTranslationDelegate != nil ||
                 storageDelegate != nil else {
                 assertionFailure("No delegates provided in arguments.")
@@ -320,6 +366,7 @@ public extension Networking {
             if let authDelegate { self.authDelegate = authDelegate }
             if let databaseDelegate { self.databaseDelegate = databaseDelegate }
             if let geminiAPIKeyDelegate { _geminiAPIKeyDelegate.wrappedValue = geminiAPIKeyDelegate }
+            if let healthDelegate { self.healthDelegate = healthDelegate }
             if let hostedTranslationDelegate { self.hostedTranslationDelegate = hostedTranslationDelegate }
             if let storageDelegate { self.storageDelegate = storageDelegate }
         }
@@ -343,6 +390,16 @@ public extension Networking {
         /// - SeeAlso: ``AuthDelegate``
         public func registerAuthDelegate(_ authDelegate: AuthDelegate) {
             register(authDelegate: authDelegate)
+        }
+
+        /// Registers a custom network health delegate.
+        ///
+        /// - Parameter healthDelegate: The delegate to
+        ///   register.
+        ///
+        /// - SeeAlso: ``NetworkHealthDelegate``
+        public func registerHealthDelegate(_ healthDelegate: NetworkHealthDelegate) {
+            register(healthDelegate: healthDelegate)
         }
 
         /// Registers a custom hosted translation

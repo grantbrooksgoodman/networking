@@ -225,7 +225,7 @@ public protocol DatabaseDelegate {
     /// transaction retries automatically until it succeeds
     /// or reaches the maximum retry count.
     ///
-    /// Each transaction bypasses operation coalescing —
+    /// Each transaction bypasses operation coalescing –
     /// concurrent transactions are always executed
     /// independently.
     ///
@@ -321,7 +321,7 @@ public extension DatabaseDelegate {
     /// Atomically writes a set of values across multiple
     /// database paths in a single operation.
     ///
-    /// Use this method to perform fan-out writes — updates
+    /// Use this method to perform fan-out writes – updates
     /// that touch several paths simultaneously. All paths
     /// in `updates` are written atomically: either every
     /// path is updated or none are.
@@ -397,7 +397,7 @@ public extension DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> T {
         try await getValues(
             at: path,
@@ -431,7 +431,7 @@ public extension DatabaseDelegate {
         at path: String,
         by delta: Int,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await increment(
             at: path,
@@ -498,7 +498,7 @@ public extension DatabaseDelegate {
         strategy: QueryStrategy = .first(10),
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> T {
         try await queryValues(
             at: path,
@@ -536,7 +536,7 @@ public extension DatabaseDelegate {
     func runTransaction(
         at path: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10),
+        timeout duration: Duration = Networking.defaultOperationTimeout,
         _ block: @Sendable @escaping (Any?) -> Any?
     ) async throws(Exception) -> Any? {
         try await runTransaction(
@@ -569,7 +569,7 @@ public extension DatabaseDelegate {
         _ value: Any,
         forKey key: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await setValue(
             value,
@@ -603,7 +603,7 @@ public extension DatabaseDelegate {
         forKey key: String,
         with data: [String: Any],
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await updateChildValues(
             forKey: key,

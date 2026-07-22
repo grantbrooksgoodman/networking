@@ -275,8 +275,18 @@ final class CoreDatabase: @unchecked Sendable {
                     }
                 }
 
+                let healthToken = HealthSampleToken()
+                let healthStartTime = Date.now
+
                 let timeout = Timeout(after: duration) {
                     guard canResume else { return }
+
+                    if healthToken.claim() {
+                        Networking.config.healthDelegate.recordCensoredLatencySample(
+                            seconds: duration.timeInterval
+                        )
+                    }
+
                     continuation.resume(
                         throwing: Exception.timedOut(
                             metadata: .init(sender: self)
@@ -289,6 +299,14 @@ final class CoreDatabase: @unchecked Sendable {
                     withCompletionBlock: { error, _ in
                         timeout.cancel()
                         guard canResume else { return }
+
+                        if healthToken.claim() {
+                            if error == nil {
+                                Networking.config.healthDelegate.recordLatencySample(
+                                    seconds: Date.now.timeIntervalSince(healthStartTime)
+                                )
+                            }
+                        }
 
                         if let error {
                             continuation.resume(
@@ -402,12 +420,17 @@ final class CoreDatabase: @unchecked Sendable {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> Any? {
-        try await Self.coalescer(
+        let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
+        let resolvedGlobalRawValue = globalCacheStrategy.map {
+            Self.resolvedStrategy($0).rawValue
+        } ?? ""
+
+        return try await Self.coalescer(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
-                operation.encodedHash
-                    + (globalCacheStrategy?.rawValue ?? "")
+                resolvedOperation.encodedHash
+                    + resolvedGlobalRawValue
                     + prependingEnvironment.description
                     + duration.description
             ).encodedHash
@@ -421,7 +444,7 @@ final class CoreDatabase: @unchecked Sendable {
 
             return await withCheckedContinuation { continuation in
                 self._performOperation(
-                    operation,
+                    resolvedOperation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
                 ) { result in
@@ -455,7 +478,15 @@ final class CoreDatabase: @unchecked Sendable {
         }
 
         let completion = OperationCompletion(completion)
+        let healthToken = HealthSampleToken()
+
         let timeout = Timeout(after: duration) {
+            if healthToken.claim() {
+                Networking.config.healthDelegate.recordCensoredLatencySample(
+                    seconds: duration.timeInterval
+                )
+            }
+
             completion(.failure(
                 .timedOut(metadata: .init(sender: self))
             ))
@@ -470,7 +501,8 @@ final class CoreDatabase: @unchecked Sendable {
                 ):
                     try await getValues(
                         at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy),
+                        healthToken: healthToken
                     )
 
                 case let .queryValues(
@@ -481,7 +513,8 @@ final class CoreDatabase: @unchecked Sendable {
                     try await queryValues(
                         at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                         strategy: strategy,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
+                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy),
+                        healthToken: healthToken
                     )
 
                 case let .setValue(
@@ -490,7 +523,8 @@ final class CoreDatabase: @unchecked Sendable {
                 ):
                     try await setValue(
                         value,
-                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
+                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
+                        healthToken: healthToken
                     )
 
                 case let .updateChildValues(
@@ -499,7 +533,8 @@ final class CoreDatabase: @unchecked Sendable {
                 ):
                     try await updateChildValues(
                         forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
-                        with: data
+                        with: data,
+                        healthToken: healthToken
                     )
                 }
 
@@ -552,8 +587,18 @@ final class CoreDatabase: @unchecked Sendable {
                     }
                 }
 
+                let healthToken = HealthSampleToken()
+                let healthStartTime = Date.now
+
                 let timeout = Timeout(after: duration) {
                     guard canResume else { return }
+
+                    if healthToken.claim() {
+                        Networking.config.healthDelegate.recordCensoredLatencySample(
+                            seconds: duration.timeInterval
+                        )
+                    }
+
                     continuation.resume(
                         throwing: Exception.timedOut(
                             metadata: .init(sender: self)
@@ -568,6 +613,14 @@ final class CoreDatabase: @unchecked Sendable {
                 } andCompletionBlock: { error, _, snapshot in
                     timeout.cancel()
                     guard canResume else { return }
+
+                    if healthToken.claim() {
+                        if error == nil {
+                            Networking.config.healthDelegate.recordLatencySample(
+                                seconds: Date.now.timeIntervalSince(healthStartTime)
+                            )
+                        }
+                    }
 
                     if let error {
                         continuation.resume(
@@ -612,7 +665,8 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func getValues(
         at path: String,
-        cacheStrategy: CacheStrategy
+        cacheStrategy: CacheStrategy,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
@@ -631,7 +685,10 @@ final class CoreDatabase: @unchecked Sendable {
 
         let getValuesStartDate = Date.now
         do {
-            let values = try await _getValues(at: path)
+            let values = try await _getValues(
+                at: path,
+                healthToken: healthToken
+            )
 
             CoreDatabaseStore.addValue(
                 .init(
@@ -654,9 +711,13 @@ final class CoreDatabase: @unchecked Sendable {
         }
     }
 
-    private func _getValues(at path: String) async throws(Exception) -> Any {
+    private func _getValues(
+        at path: String,
+        healthToken: HealthSampleToken
+    ) async throws(Exception) -> Any {
+        let healthStartTime = Date.now
         do {
-            return try await withCheckedThrowingContinuation { continuation in
+            let value: Any = try await withCheckedThrowingContinuation { continuation in
                 @LockIsolated var didResume = false
                 var canResume: Bool {
                     $didResume.withValue {
@@ -687,9 +748,26 @@ final class CoreDatabase: @unchecked Sendable {
                     ))
                 }
             }
+
+            HealthEvidence.record(
+                error: nil,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
+
+            return value
         } catch let error as Exception {
+            HealthEvidence.record(
+                error: error,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
+
             throw error
         } catch {
+            _ = healthToken.claim()
             throw Exception(
                 error,
                 metadata: .init(sender: self)
@@ -700,7 +778,8 @@ final class CoreDatabase: @unchecked Sendable {
     private func queryValues(
         at path: String,
         strategy: QueryStrategy,
-        cacheStrategy: CacheStrategy
+        cacheStrategy: CacheStrategy,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
@@ -724,8 +803,17 @@ final class CoreDatabase: @unchecked Sendable {
         case let .last(limit): reference.queryLimited(toLast: .init(limit))
         }
 
+        let healthStartTime = Date.now
         do {
             let getDataResult = try await query.getData()
+
+            HealthEvidence.record(
+                error: nil,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
+
             guard !isEmpty(getDataResult.value),
                   let value = getDataResult.value else {
                 throw Exception(
@@ -745,12 +833,21 @@ final class CoreDatabase: @unchecked Sendable {
 
             return value
         } catch let error as Exception {
+            HealthEvidence.record(
+                error: error,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
+
             guard cacheStrategy == .returnCacheOnFailure,
                   let cachedValue else { throw error }
 
             Logger.log(error, domain: .Networking.database)
             return cachedValue
         } catch {
+            _ = healthToken.claim()
+
             let exception = Exception(
                 error,
                 metadata: .init(sender: self)
@@ -768,7 +865,8 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func setValue(
         _ value: Any,
-        forKey key: String
+        forKey key: String,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         guard isEncodable(value) else {
             throw .Networking.invalidType(
@@ -783,11 +881,20 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
+        let healthStartTime = Date.now
         do {
             _ = try await firebaseDatabase
                 .child(key)
                 .setValue(value)
+
+            HealthEvidence.record(
+                error: nil,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
         } catch {
+            _ = healthToken.claim()
             throw Exception(
                 error,
                 metadata: .init(sender: self)
@@ -809,7 +916,8 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func updateChildValues(
         forKey key: String,
-        with data: [String: Any]
+        with data: [String: Any],
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         guard data.values.allSatisfy({ isEncodable($0) }) else {
             throw .Networking.invalidType(
@@ -824,11 +932,20 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
+        let healthStartTime = Date.now
         do {
             _ = try await firebaseDatabase
                 .child(key)
                 .updateChildValues(data)
+
+            HealthEvidence.record(
+                error: nil,
+                startTime: healthStartTime,
+                token: healthToken,
+                delegate: Networking.config.healthDelegate
+            )
         } catch {
+            _ = healthToken.claim()
             throw Exception(
                 error,
                 metadata: .init(sender: self)
@@ -871,6 +988,14 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func isEmpty(_ value: Any?) -> Bool {
         value is NSNull
+    }
+
+    private static func resolvedStrategy(_ strategy: CacheStrategy) -> CacheStrategy {
+        guard strategy == .adaptive else { return strategy }
+        return NetworkHealthResolver.resolve(
+            health: Networking.config.healthDelegate.health,
+            configuration: Networking.config.networkHealthConfiguration
+        )
     }
 }
 

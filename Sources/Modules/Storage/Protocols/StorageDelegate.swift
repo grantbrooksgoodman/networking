@@ -307,7 +307,7 @@ public extension StorageDelegate {
         at path: String,
         includeItemsInSubdirectories: Bool,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await deleteAllItems(
             at: path,
@@ -336,7 +336,7 @@ public extension StorageDelegate {
     func deleteItem(
         at path: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await deleteItem(
             at: path,
@@ -376,7 +376,7 @@ public extension StorageDelegate {
         includeItemsInSubdirectories: Bool,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await downloadAllItems(
             at: path,
@@ -415,7 +415,7 @@ public extension StorageDelegate {
         to localPath: URL,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await downloadItem(
             at: path,
@@ -450,7 +450,7 @@ public extension StorageDelegate {
     func enumerateEmptyDirectories(
         startingAt path: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> Set<String> {
         try await enumerateEmptyDirectories(
             startingAt: path,
@@ -486,7 +486,7 @@ public extension StorageDelegate {
         at path: String,
         firstResultOnly: Bool = false,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> DirectoryListing {
         try await getDirectoryListing(
             at: path,
@@ -526,7 +526,7 @@ public extension StorageDelegate {
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> Bool {
         try await itemExists(
             as: itemType,
@@ -561,7 +561,7 @@ public extension StorageDelegate {
     func sizeInKilobytes(
         ofItemAt path: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> Int {
         try await sizeInKilobytes(
             ofItemAt: path,
@@ -594,7 +594,7 @@ public extension StorageDelegate {
         _ data: Data,
         metadata: HostedItemMetadata,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await upload(
             data,

@@ -79,6 +79,47 @@ enum DatabaseOperation: EncodedHashable, @unchecked Sendable {
         }
     }
 
+    // MARK: - Methods
+
+    /// Returns a copy with any ``CacheStrategy/adaptive``
+    /// cache strategy resolved to a concrete value based
+    /// on the current network health.
+    func resolvingAdaptiveCacheStrategy() -> DatabaseOperation {
+        switch self {
+        case let .getValues(
+            atPath: path,
+            cacheStrategy: cacheStrategy
+        ):
+            guard cacheStrategy == .adaptive else { return self }
+            return .getValues(
+                atPath: path,
+                cacheStrategy: NetworkHealthResolver.resolve(
+                    health: Networking.config.healthDelegate.health,
+                    configuration: Networking.config.networkHealthConfiguration
+                )
+            )
+
+        case let .queryValues(
+            atPath: path,
+            strategy: strategy,
+            cacheStrategy: cacheStrategy
+        ):
+            guard cacheStrategy == .adaptive else { return self }
+            return .queryValues(
+                atPath: path,
+                strategy: strategy,
+                cacheStrategy: NetworkHealthResolver.resolve(
+                    health: Networking.config.healthDelegate.health,
+                    configuration: Networking.config.networkHealthConfiguration
+                )
+            )
+
+        case .setValue,
+             .updateChildValues:
+            return self
+        }
+    }
+
     // MARK: - JSON Identifier
 
     private func jsonIdentifier(

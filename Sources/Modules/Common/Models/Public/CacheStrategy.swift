@@ -17,6 +17,20 @@ import Foundation
 public enum CacheStrategy: Sendable {
     // MARK: - Cases
 
+    /// Resolves to a concrete strategy at operation time based
+    /// on the current ``NetworkHealth``.
+    ///
+    /// When the health score falls below
+    /// ``NetworkHealthConfiguration/adaptiveScoreThreshold``,
+    /// the strategy resolves to ``returnCacheFirst``. Otherwise
+    /// – including when health is ``NetworkHealth/unknown`` –
+    /// it resolves to ``returnCacheOnFailure``.
+    ///
+    /// The default behavior of the framework is unchanged:
+    /// nothing resolves to `.adaptive` unless a caller
+    /// explicitly passes it.
+    case adaptive
+
     /// Ignores any cached data and always fetches from
     /// the network.
     case disregardCache
@@ -33,6 +47,7 @@ public enum CacheStrategy: Sendable {
 
     var rawValue: String {
         switch self {
+        case .adaptive: "adaptive"
         case .disregardCache: "disregardCache"
         case .returnCacheFirst: "returnCacheFirst"
         case .returnCacheOnFailure: "returnCacheOnFailure"

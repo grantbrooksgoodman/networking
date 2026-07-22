@@ -24,11 +24,13 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
     - [Macros](#macros)
   - [Database](#database)
   - [Gemini](#gemini)
+  - [Health](#health)
   - [Storage](#storage)
   - [Translation](#translation)
 - [Performance](#performance)
   - [Connection Prewarming](#connection-prewarming)
   - [Operation Coalescing](#operation-coalescing)
+  - [Adaptive Caching](#adaptive-caching)
 - [Delegate Customization](#delegate-customization)
 - [Dependencies](#dependencies)
 
@@ -40,7 +42,7 @@ Networking builds on the foundation provided by [AppSubsystem](https://github.co
 
 **Your app must initialize AppSubsystem before using Networking.** The two frameworks share a single dependency graph, a single persistence layer, and a single set of developer tools. Networking registers its services, cache domains, logger domains, and Developer Mode actions directly into the infrastructure that AppSubsystem provides. As a result, Networking is _not a standalone framework_ – it requires a [fully configured AppSubsystem environment](https://github.com/grantbrooksgoodman/app-subsystem#installation) to function.
 
-Networking is organized around six modules, each focused on a specific backend service:
+Networking is organized around seven modules, each focused on a specific backend service:
 
 - **Auth.** User authentication with anonymous sign-in and phone number verification, backed by Firebase Authentication.
 
@@ -49,6 +51,8 @@ Networking is organized around six modules, each focused on a specific backend s
 - **Database.** Key-path-based reading, writing, querying, and real-time observation of structured data, backed by Firebase Realtime Database. Operations support configurable caching, timeouts, and environment-scoped paths.
 
 - **Gemini.** AI-enhanced translation powered by the Gemini API, with configurable models, token limits, and contextual prompts.
+
+- **Health.** Passive network quality estimation based on observed database and storage operations. Produces a continuous health score and tier classification without active probing.
 
 - **Storage.** File upload, download, deletion, and directory listing for cloud-hosted assets, backed by Firebase Cloud Storage.
 
@@ -84,7 +88,7 @@ Networking relies on AppSubsystem for its core infrastructure. The table below s
 |---|---|
 | Dependency injection (`@Dependency`) | Exposes all networking services through the shared dependency graph. Your code accesses services using `@Dependency(\.networking)`. |
 | Persistence (`@Persistent`) | Persists the active network environment and indicator state across launches using strongly typed storage keys. |
-| Reactive observation (`Observable`) | Publishes network activity state for cross-feature observation. |
+| Reactive observation (`Observable`) | Publishes network activity and network health state for cross-feature observation. |
 | Logging (`Logger`, `LoggerDomain`) | Logs operations across database, storage, and translation modules using scoped logger domains. |
 | Caching (`CacheDomain`) | Registers networking-specific cache domains that integrate with the system-wide cache clearing provided by AppSubsystem. |
 | Developer tools (`DevModeService`) | Registers Developer Mode actions for switching environments and toggling the network activity indicator in pre-release builds. |
@@ -113,12 +117,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 ```
 
-`Networking.initialize()` performs four operations:
+`Networking.initialize()` performs five operations:
 
 1. Configures Firebase App Check, using App Attest on physical devices and a debug provider in the simulator.
 2. Configures the Firebase backend by calling `FirebaseApp.configure()`.
-3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching and network activity indicator toggling.
+3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching, network activity indicator toggling, and network health inspection.
 4. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
+5. Starts the network health monitor, which passively observes operation performance to estimate connection quality.
 
 > **Important:** `Networking.initialize()` must be called on the main actor. The `Networking.config` property is not available until initialization completes.
 
@@ -134,7 +139,7 @@ let values: [String: Any] = try await networking.database.getValues(
 )
 ```
 
-Each property on [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift) returns the currently registered delegate for that service – [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift), [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift), [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift), or [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift).
+Each property on [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift) returns the currently registered delegate for that service – [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift), [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift), [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift), [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift), or [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift).
 
 ### Environment Management
 
@@ -542,7 +547,7 @@ let task = Task {
 }
 ```
 
-The observer is automatically removed when the consuming task is cancelled or the iteration ends — no manual cleanup is required. To stop observing, cancel the task:
+The observer is automatically removed when the consuming task is cancelled or the iteration ends – no manual cleanup is required. To stop observing, cancel the task:
 
 ```swift
 task.cancel()
@@ -556,6 +561,7 @@ Database read operations accept an optional [`CacheStrategy`](Sources/Modules/Co
 
 | Case | Behavior |
 |---|---|
+| `.adaptive` | Resolves to a concrete cache strategy at runtime based on the current network health score. See [Adaptive Caching](#adaptive-caching). |
 | `.returnCacheFirst` | Returns cached data immediately when available, without making a network request. |
 | `.returnCacheOnFailure` | Fetches from the network first, and falls back to cached data only if the request fails. |
 | `.disregardCache` | Ignores any cached data and always fetches from the network. |
@@ -591,6 +597,64 @@ let translation = try await hostedTranslation.translate(
 ```
 
 The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum defines the available models for enhancement. The default is `flash25`.
+
+### Health
+
+The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs.
+
+#### Reading Health
+
+Access the current health value synchronously through the delegate:
+
+```swift
+@Dependency(\.networking.health) var health: NetworkHealthDelegate
+
+let currentHealth = health.health
+```
+
+[`NetworkHealth`](Sources/Modules/Health/Models/Public/NetworkHealth.swift) is either `.measured(score:tier:)` or `.unknown`. A measured health carries a continuous score in the range [0.0, 1.0] and a discrete [`NetworkHealthTier`](Sources/Modules/Health/Models/Public/NetworkHealth.swift) of `.good`, `.fair`, or `.poor`. Health is `.unknown` until enough operations have been observed to produce a reliable estimate.
+
+#### Observing Changes
+
+For views that need to react to health changes, include `Observables.networkHealth` in your observer's `observedValues` and handle updates in `onChange(of:)`, following the standard AppSubsystem `Observer` pattern:
+
+```swift
+struct MyObserver: Observer {
+    typealias R = MyReducer
+
+    let observedValues: [any ObservableProtocol] = [Observables.networkHealth]
+    let viewModel: ViewModel<MyReducer>
+
+    func onChange(of observable: Observable<Any>) {
+        switch observable {
+        case Observables.networkHealth:
+            guard let health = observable.value as? NetworkHealth else { return }
+            send(.networkHealthChanged(health))
+        default: ()
+        }
+    }
+}
+```
+
+When you only need the current value — for example, to make a branching decision in a service — read it directly from the delegate without setting up an observer.
+
+#### Configuration
+
+Scoring parameters – including tier thresholds, channel weights, and the half-life of the exponentially weighted moving average – can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift):
+
+```swift
+var configuration = NetworkHealthConfiguration()
+configuration.goodTierThreshold = 0.8
+Networking.config.setNetworkHealthConfiguration(configuration)
+```
+
+The default configuration is suitable for most apps. Adjust individual parameters only when you have specific requirements for sensitivity or scoring behavior.
+
+#### Instrumentation
+
+Health estimation is built into the default Firebase-backed database and storage implementations. Database operations contribute latency samples; storage uploads and downloads contribute throughput samples. Cache hits, coalesced operations, and offline failures are automatically excluded.
+
+> **Note:** Only the built-in Firebase implementations are instrumented. Custom delegates registered through `Networking.config` are not observed by the health system.
 
 ### Storage
 
@@ -665,6 +729,19 @@ The default database and storage implementations automatically coalesce identica
 
 This deduplication is transparent and requires no additional configuration.
 
+### Adaptive Caching
+
+The `.adaptive` cache strategy ties caching behavior to the current network health score. When the score falls below the configured threshold, `.adaptive` resolves to `.returnCacheFirst`, serving cached data immediately to avoid slow network round-trips. When the score is at or above the threshold, it resolves to `.returnCacheOnFailure`, preferring fresh data while still falling back to the cache on failure:
+
+```swift
+let values: [String: Any] = try await database.getValues(
+    at: "users/123",
+    cacheStrategy: .adaptive
+)
+```
+
+The resolution threshold defaults to `0.3` and can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift). Resolution occurs at the point of operation dispatch, so two `.adaptive` operations dispatched at different times may resolve to different concrete strategies if the health score changes between them.
+
 ---
 
 ## Delegate Customization
@@ -677,6 +754,7 @@ Default behavior can be replaced by registering custom delegates on `Networking.
 | [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) | Key-path-based data access. | Firebase Realtime Database. |
 | [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) | Cloud file operations. | Firebase Cloud Storage. |
 | [`GeminiAPIKeyDelegate`](Sources/Modules/Gemini/Protocols/GeminiAPIKeyDelegate.swift) | Gemini API key provider. | None (must be registered to use AI enhancement). |
+| [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) | Passive network quality estimation. | Built-in EWMA-based health estimator. |
 | [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift) | String translation. | Built-in hosted translation service. |
 | [`NetworkActivityIndicatorDelegate`](Sources/Modules/Common/Protocols/NetworkActivityIndicatorDelegate.swift) | Activity indicator appearance. | Default activity indicator. |
 
@@ -685,6 +763,7 @@ Register delegates individually or in a single call:
 ```swift
 Networking.config.register(
     databaseDelegate: myDatabaseDelegate,
+    healthDelegate: myHealthDelegate,
     storageDelegate: myStorageDelegate
 )
 
