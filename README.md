@@ -636,7 +636,7 @@ struct MyObserver: Observer {
 }
 ```
 
-When you only need the current value — for example, to make a branching decision in a service — read it directly from the delegate without setting up an observer.
+When you only need the current value – for example, to make a branching decision in a service – read it directly from the delegate without setting up an observer.
 
 #### Configuration
 
