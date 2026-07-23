@@ -19,7 +19,10 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
 
     // MARK: - Properties
 
-    let observedValues: [any ObservableProtocol] = [Observables.isNetworkActivityOccurring]
+    let observedValues: [any ObservableProtocol] = [
+        Observables.isNetworkActivityOccurring,
+        Observables.networkHealth,
+    ]
     let viewModel: ViewModel<NetworkActivityIndicatorReducer>
 
     @LockIsolated private var taskID = UUID()
@@ -59,6 +62,13 @@ final class NetworkActivityIndicatorObserver: Observer, @unchecked Sendable {
                       !Observables.isNetworkActivityOccurring.value else { return }
                 // swiftformat:enable all
                 send(.isVisibleChanged(false))
+            }
+
+        case Observables.networkHealth:
+            Task { @MainActor in
+                send(.backgroundColorChanged(
+                    Networking.config.activityIndicatorDelegate.backgroundColor
+                ))
             }
 
         default: ()
