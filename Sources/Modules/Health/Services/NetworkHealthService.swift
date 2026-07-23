@@ -209,9 +209,9 @@ private actor HealthEstimator {
         }
 
         let latencyScore = channelScore(
-            mean: latencyChannel.mean,
-            floor: configuration.latencyFloor,
-            ceiling: configuration.latencyCeiling,
+            mean: log2(max(latencyChannel.mean, 0.001)),
+            floor: log2(configuration.latencyFloor),
+            ceiling: log2(configuration.latencyCeiling),
             inverted: true
         )
 

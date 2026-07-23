@@ -74,13 +74,13 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// The latency, in seconds, at or above which the latency
     /// channel maps to a score of approximately zero.
     ///
-    /// Default value is `5` seconds.
+    /// Default value is `3` seconds.
     public var latencyCeiling: TimeInterval
 
     /// The latency, in seconds, at or below which the latency
     /// channel maps to a score of approximately one.
     ///
-    /// Default value is `0.25` seconds.
+    /// Default value is `0.1` seconds.
     public var latencyFloor: TimeInterval
 
     /// The minimum aggregate channel confidence required to
@@ -128,8 +128,8 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         fairTierThreshold: Double = 0.3,
         goodTierThreshold: Double = 0.7,
         halfLife: TimeInterval = 30,
-        latencyCeiling: TimeInterval = 5,
-        latencyFloor: TimeInterval = 0.25,
+        latencyCeiling: TimeInterval = 3,
+        latencyFloor: TimeInterval = 0.1,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
         throughputCeiling: Double = 22,

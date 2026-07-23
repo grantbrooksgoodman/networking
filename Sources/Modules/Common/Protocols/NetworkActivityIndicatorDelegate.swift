@@ -58,9 +58,19 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
 
     // MARK: - Computed Properties
 
-    /// The background color of the indicator.
+    /// The background color of the indicator. The default
+    /// reflects the current network health tier: green for
+    /// good, orange for fair, red for poor, and `nil`
+    /// (transparent) when health is unknown.
     @MainActor
-    public var backgroundColor: Color? { nil }
+    public var backgroundColor: Color? {
+        switch Networking.config.healthDelegate.health.tier {
+        case .fair: .orange
+        case .good: .green
+        case .poor: .red
+        case nil: nil
+        }
+    }
 
     // MARK: - Init
 
