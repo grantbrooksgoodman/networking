@@ -68,21 +68,19 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Larger values make the estimator more conservative; smaller
     /// values make it more responsive to recent samples.
     ///
-    /// Default value is `90` seconds.
+    /// Default value is `30` seconds.
     public var halfLife: TimeInterval
 
     /// The latency, in seconds, at or above which the latency
     /// channel maps to a score of approximately zero.
     ///
-    /// Default value matches the framework's default operation
-    /// timeout (`10` seconds).
+    /// Default value is `5` seconds.
     public var latencyCeiling: TimeInterval
 
     /// The latency, in seconds, at or below which the latency
     /// channel maps to a score of approximately one.
     ///
-    /// Default value is `0.5` seconds (5% of the default
-    /// operation timeout).
+    /// Default value is `0.25` seconds.
     public var latencyFloor: TimeInterval
 
     /// The minimum aggregate channel confidence required to
@@ -129,9 +127,9 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         expensivePenalty: Double = 0.95,
         fairTierThreshold: Double = 0.3,
         goodTierThreshold: Double = 0.7,
-        halfLife: TimeInterval = 90,
-        latencyCeiling: TimeInterval = 10,
-        latencyFloor: TimeInterval = 0.5,
+        halfLife: TimeInterval = 30,
+        latencyCeiling: TimeInterval = 5,
+        latencyFloor: TimeInterval = 0.25,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
         throughputCeiling: Double = 22,
