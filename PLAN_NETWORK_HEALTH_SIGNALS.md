@@ -10,7 +10,11 @@ This is a **clean-room implementation**. Do not source, reference, or reconstruc
 
 ## 1. Purpose
 
-Broaden the evidence base of the health estimator beyond the two existing measurement channels (Database latency, Storage throughput). Seven additions, in descending value-per-effort order:
+Two goals, in strict order:
+
+**First (Phase 0), fix a verified functional regression in the Storage module's public surface:** the wrapper hides transfer progress that raw Firebase exposes (`StorageUploadTask`/`StorageDownloadTask` progress observation), so an app cannot build a progress bar without dropping to raw Firebase. Confirmed against source: `StorageDelegate.upload` and `downloadItem` are plain `async throws(Exception)` methods with no progress affordance, and `CoreStorage` calls `putDataAsync`/`writeAsync` in their progress-less forms. The package already established the streaming idiom to fix this with — `observe(path:)` returns `AsyncThrowingStream` (`DatabaseDelegate.swift`). Phase 0 closes the gap *and* builds the internal progress plumbing that Phase 4 taps for health evidence.
+
+**Second, broaden the evidence base of the health estimator** beyond the two existing measurement channels (Database latency, Storage throughput). Seven additions, in descending value-per-effort order:
 
 1. **Jitter** — a second-moment (variance) EWMA per channel; high dispersion penalizes the score even when the mean looks fine.
 2. **Failure rate** — a smoothed success/failure ratio derived from evidence the seams already produce.
@@ -28,13 +32,57 @@ These apply to every phase.
 - **No new third-party dependencies.** `Network`, `CoreTelephony`, and `UIKit` are system frameworks and permitted.
 - **No behavior change for existing callers.** Everything ships either always-on-and-passive (pure math, zero traffic), passive-with-a-side-effect (opt-out where noted), or opt-in (probing). Public API is additive only.
 - **Platform guards.** `Package.swift` declares `.iOS(.v18)` **and** `.macOS(.v13)`. CoreTelephony and UIKit do not exist on macOS — wrap their use in `#if canImport(CoreTelephony)` / `#if canImport(UIKit)` and design the fallbacks to be no-ops.
-- **Protocol evolution must be source-compatible.** `NetworkHealthDelegate` is public with custom-conformance support. New requirements are added via a *single* extensible entry point with a no-op default implementation (see §3), never as bare new requirements.
+- **Protocol evolution must be source-compatible.** `NetworkHealthDelegate` and `StorageDelegate` are public with custom-conformance support. New requirements always ship with default implementations — `NetworkHealthDelegate` via a *single* extensible entry point with a no-op default (see §4), `StorageDelegate` via defaults that wrap the existing non-progress methods (see §3). Never add a bare new requirement.
 - **`Networking.config` access stays lazy** (read at use time inside method bodies; never during static/type construction — `Config.shared` fatal-errors before `Networking.initialize()`).
 - **Recording stays fire-and-forget.** No instrumentation may add latency, ordering constraints, or failure modes to the operation it observes. Follow the existing pattern: synchronous seam → `Networking.config.healthDelegate.record…` → `Task` into the `HealthEstimator` actor.
 - **Conventions:** exact file headers, `/* Native */ / /* Proprietary */ / /* 3rd-party */` import groups, Apple-voice DocC on all public symbols, `LockIsolated` for shared mutable state, strict-concurrency-clean under Swift 6 with zero new warnings.
 - **Documentation per phase:** each phase updates the README Health section and DocC for whatever it adds, and extends `NetworkHealthService.debugSummary()` (the Dev Mode inspection surface) with its new state. Phase 8 consolidates.
 
-## 3. Shared Groundwork (Phase 1)
+## 3. Phase 0 — Public Storage Transfer Progress API
+
+Implement this **before any health work**. It repairs the wrapper's one strictly-worse-than-Firebase spot and creates the progress plumbing Phase 4 reuses.
+
+**Files:** new `Sources/Modules/Storage/Models/Public/StorageTransferProgress.swift`; `Sources/Modules/Storage/Protocols/StorageDelegate.swift`; `Sources/Modules/Storage/Services/Storage.swift`; `Sources/Modules/Storage/Services/CoreStorage.swift`.
+
+1. **Progress value type.** The feedback's suggested `AsyncStream<Progress>` shape is right in spirit, but Foundation's `Progress` is a non-`Sendable` reference type that Firebase mutates in place — yielding it across a stream fights Swift 6 strict concurrency. Define a snapshot value type instead:
+   ```swift
+   public struct StorageTransferProgress: Equatable, Sendable {
+       public let completedBytes: Int64
+       public let totalBytes: Int64
+       public var fractionCompleted: Double { … } // guard totalBytes > 0
+   }
+   ```
+   Snapshot it from the Firebase `Progress` callback (`completedUnitCount`/`totalUnitCount`).
+2. **Protocol additions**, each with a **default implementation** so existing custom `StorageDelegate` conformances keep compiling (the default wraps the corresponding non-progress method in a `Task` and finishes the stream with no progress events — functional, just progress-silent):
+   ```swift
+   func uploadWithProgress(
+       _ data: Data,
+       metadata: HostedItemMetadata,
+       prependingEnvironment: Bool,
+       timeout duration: Duration
+   ) -> AsyncThrowingStream<StorageTransferProgress, any Error>
+
+   func downloadItemWithProgress(
+       at path: String,
+       to localPath: URL,
+       prependingEnvironment: Bool,
+       cacheStrategy: CacheStrategy,
+       timeout duration: Duration
+   ) -> AsyncThrowingStream<StorageTransferProgress, any Error>
+   ```
+   Plus the usual defaulted-parameter convenience overloads in the protocol extension (`prependingEnvironment: Bool = true`, `cacheStrategy: CacheStrategy = .returnCacheFirst`, `timeout duration: Duration = Networking.defaultOperationTimeout`), matching the existing overload style and DocC voice. Verify the names against local conventions before committing to them; the requirement is that they not collide with the existing `upload`/`downloadItem` overload sets in a way that forces call-site type annotations.
+3. **Stream semantics** (mirror the `observe(path:)` contract, documented in DocC):
+   - Yields progress snapshots as the transfer advances; **finishes** on success; **throws** the `Exception` on failure.
+   - Terminating the stream (cancelling the iterating task) before completion **cancels the transfer**, exactly as cancelling an `observe` iteration removes the observer. Callers who want fire-and-forget semantics use the existing plain `upload`/`downloadItem`.
+   - A `downloadItemWithProgress` call satisfied by cache (`returnCacheFirst` hit) finishes immediately with no progress events.
+   - The operation `Timeout`, read/write-enablement guard, offline guard, activity-indicator show/hide, environment prepending, and cache-store bookkeeping all behave identically to the plain variants.
+   - **Progress-reporting operations are not coalesced.** Routing a stream through `KeyedCoalescer`'s single-result `Callback` shape would deliver progress to only one of several deduped callers; a progress-observed transfer is interactive UX where correct delivery matters more than dedup. Bypass the coalescer for these two entry points (keep every guard just listed), and document the non-coalescing behavior in DocC and the README's Operation Coalescing section.
+4. **Internal plumbing (the part Phase 4 reuses).** In `CoreStorage`, thread an optional `onProgress: (@Sendable (StorageTransferProgress) -> Void)?` parameter (default `nil`) into `upload` and `_downloadItem`, implemented with Firebase's progress-reporting call forms — `putDataAsync(_:metadata:onProgress:)` and `writeAsync(toFile:onProgress:)`. Verify the exact overload signatures against the resolved FirebaseStorage checkout; if a needed overload is missing in the pinned SDK version, fall back to the task-based API (`putData`/`write` returning `StorageUploadTask`/`StorageDownloadTask` with `.observe(.progress)`) for that call site only, keeping completion semantics identical. Plain calls pass `nil` and behave exactly as today. The existing health `recordThroughputSample` instrumentation at these two seams is untouched in this phase.
+5. **Documentation:** README Storage section gains an "Observing Transfer Progress" subsection with an iteration example; DocC on both new methods and the progress type.
+
+**Acceptance:** existing `upload`/`downloadItem` call sites and custom `StorageDelegate` conformances compile and behave unchanged; a progress-variant upload of a multi-megabyte payload yields monotonically non-decreasing snapshots ending in a finished stream; cancelling the iteration cancels the transfer; failures surface as thrown `Exception`s; cache-hit downloads finish silently.
+
+## 4. Shared Groundwork (Phase 1)
 
 Everything later phases need from the core types, done once.
 
@@ -79,7 +127,7 @@ Everything later phases need from the core types, done once.
 
 **Acceptance:** builds clean; behavior identical to baseline (new channels exist but nothing feeds them yet; `record(_:)` defaults to no-op; `computeHealth` produces bit-identical scores when all new penalties are zero).
 
-## 4. Phase 2 — Jitter & Failure Rate (pure math, zero new traffic)
+## 5. Phase 2 — Jitter & Failure Rate (pure math, zero new traffic)
 
 **Files:** `NetworkHealthService.swift`, `NetworkHealthConfiguration.swift`. No seam changes at all.
 
@@ -100,7 +148,7 @@ Everything later phases need from the core types, done once.
 
 **Acceptance:** with `jitterPenaltyWeight = 0` and `failureRatePenaltyWeight = 0` the score is bit-identical to baseline; monotonicity holds (a lower-dispersion history never scores worse than a higher-dispersion one with the same means).
 
-## 5. Phase 3 — Connection Stability (`.info/connected`)
+## 6. Phase 3 — Connection Stability (`.info/connected`)
 
 The RTDB client's own realtime judgment of its websocket. Passive in the sense of generating no *requests* — but see the hazard below.
 
@@ -123,13 +171,13 @@ The RTDB client's own realtime judgment of its websocket. Passive in the sense o
 
 **Acceptance:** no observer attaches in an app that performs no Database operations or sets the flag false; flaps during background are ignored; score degradation appears only after genuine foreground socket drops.
 
-## 6. Phase 4 — Transfer Progress & Stall Detection
+## 7. Phase 4 — Transfer Progress & Stall Detection
 
-Learn about a 30 MB upload while it happens, not 10 seconds after it dies.
+Learn about a 30 MB upload while it happens, not 10 seconds after it dies. Builds directly on Phase 0's plumbing.
 
 **Files:** new `Sources/Modules/Health/Models/Internal/TransferProgressProbe.swift`; `CoreStorage.swift` (the two existing throughput seams); `NetworkHealthConfiguration.swift`.
 
-1. **Firebase APIs:** switch the two instrumented call sites to the progress-reporting overloads — `putDataAsync(_:metadata:onProgress:)` in `CoreStorage.upload` and `writeAsync(toFile:onProgress:)` in `CoreStorage._downloadItem`. Verify the exact overload signatures against the resolved FirebaseStorage checkout; if a given overload is missing in the pinned SDK version, fall back to the task-based API (`putData`/`write` returning `StorageUploadTask`/`StorageDownloadTask` with `.observe(.progress)`) for that call site only, keeping the async completion semantics identical.
+1. **Tap the Phase 0 plumbing — no new Firebase surface.** `CoreStorage.upload` and `_downloadItem` already accept an optional `onProgress` sink threaded to Firebase's progress callbacks (Phase 0, step 4). Health instrumentation attaches a `TransferProgressProbe` to **every** transfer at these two seams — plain and progress-variant calls alike — by composing the probe's sink with any caller-supplied `onProgress` closure (invoke both; the probe first, since it must never be starved by a slow caller closure — both are non-blocking by contract).
 2. **`TransferProgressProbe`** — one internal `final class … @unchecked Sendable` instance per transfer, `LockIsolated` state: last-progress timestamp, last byte count, segment accumulator, stall-reported flag. Behavior:
    - **Segment samples:** on each progress callback, accumulate `completedUnitCount` deltas; whenever the accumulated segment reaches `minimumThroughputSampleBytes` (reuse the existing gate — no new config), record a throughput sample for that segment (`bytes: segment, seconds: timeSinceSegmentStart`) and reset the segment accumulator.
    - **Completion:** on transfer success, record the final partial segment *only if* it meets the gate; then mark the probe finished.
@@ -141,7 +189,7 @@ Learn about a 30 MB upload while it happens, not 10 seconds after it dies.
 
 **Acceptance:** large transfers produce multiple gated throughput samples over their lifetime; a transfer with progress frozen ≥ `transferStallSeconds` degrades the score before its timeout fires; small transfers behave exactly as baseline; no sample is recorded twice for the same bytes.
 
-## 7. Phase 5 — URLSession Task Metrics on Gemini Traffic
+## 8. Phase 5 — URLSession Task Metrics on Gemini Traffic
 
 Passive enrichment from HTTPS requests the package already sends. **Scope: Gemini only.** The Translation module's traffic flows through the external `Translator` package (opaque, multi-platform fallback and retry semantics that would pollute latency) — explicitly out of scope; note this in the summary.
 
@@ -158,7 +206,7 @@ Passive enrichment from HTTPS requests the package already sends. **Scope: Gemin
 
 **Acceptance:** Gemini requests on cold connections contribute handshake latency samples; reused-connection requests contribute nothing to latency; total inference time never enters any channel; disabling the flag restores baseline behavior exactly.
 
-## 8. Phase 6 — Radio Access Technology Prior
+## 9. Phase 6 — Radio Access Technology Prior
 
 A coarse system-supplied prior, not a measurement. iOS only.
 
@@ -181,7 +229,7 @@ A coarse system-supplied prior, not a measurement. iOS only.
 
 **Acceptance:** compiles for macOS (prior inert); on Wi-Fi the caps never apply; on legacy cellular a fully warmed-up estimator cannot report above the cap; disabling the flag restores baseline scoring.
 
-## 9. Phase 7 — Active Probing (Opt-In)
+## 10. Phase 7 — Active Probing (Opt-In)
 
 The only phase that generates traffic. Philosophy: a probe exists to cure the idle-confidence gap — the situation where a consumer wants a decision and the estimator has decayed to `.unknown`. It fires **on demand, never on a timer.**
 
@@ -208,19 +256,20 @@ The only phase that generates traffic. Philosophy: a probe exists to cure the id
 
 **Acceptance:** with `probeConfiguration == nil` (the default) the package's network behavior is byte-for-byte identical to baseline — zero probes under any circumstances. When configured: a `.unknown` read while idle produces at most one probe per minimum interval; probes stop the moment confidence recovers; Low Power Mode and constrained paths suppress probing; the budget is never exceeded.
 
-## 10. Phase 8 — Consolidation
+## 11. Phase 8 — Consolidation
 
-1. **README:** rewrite the Health module section to present the full signal inventory in three groups — measurements (latency, throughput, handshake, progress segments), derived statistics (jitter, failure rate, stability), and priors/policies (path penalties, RAT caps, offline hard-zero) — plus a dedicated, clearly-flagged subsection for opt-in active probing (what it sends, when, and how to enable it), and the two documented opt-outs (`isConnectionStabilityMonitoringEnabled`, `isURLSessionMetricsEnabled`). Update the configuration table with every new field and default.
+1. **README:** verify the Storage section's "Observing Transfer Progress" subsection (Phase 0) reads consistently with the module's other subsections, and rewrite the Health module section to present the full signal inventory in three groups — measurements (latency, throughput, handshake, progress segments), derived statistics (jitter, failure rate, stability), and priors/policies (path penalties, RAT caps, offline hard-zero) — plus a dedicated, clearly-flagged subsection for opt-in active probing (what it sends, when, and how to enable it), and the two documented opt-outs (`isConnectionStabilityMonitoringEnabled`, `isURLSessionMetricsEnabled`). Update the configuration table with every new field and default.
 2. **DocC pass** over all new public symbols (`NetworkHealthEvent`, `NetworkHealthProbeConfiguration`, all new configuration properties) for voice consistency with the existing module.
 3. **Dev Mode:** verify `debugSummary()` renders every signal added across phases in a readable multi-line layout (it is presented in an `AKAlert`; keep lines short).
-4. **Final sweep:** confirm the acceptance line of every phase still holds after integration — in particular that all default-configuration behavior deltas versus baseline are limited to: new penalties active (jitter/failure/stability), progress-segment throughput samples, Gemini handshake samples, RAT caps on legacy cellular, and the lazily attached `.info/connected` observer for RTDB-using apps. Anything else observable is a defect.
+4. **Final sweep:** confirm the acceptance line of every phase still holds after integration — in particular that all default-configuration behavior deltas versus baseline are limited to: the new additive Storage progress API (existing methods untouched), new penalties active (jitter/failure/stability), progress-segment throughput samples, Gemini handshake samples, RAT caps on legacy cellular, and the lazily attached `.info/connected` observer for RTDB-using apps. Anything else observable is a defect.
 
-## 11. Decisions Deferred to You
+## 12. Decisions Deferred to You
 
 Resolve against local source; document each choice in your summary:
 
-1. Exact FirebaseStorage progress API shape available in the pinned SDK (`onProgress` overloads vs task-observer fallback) — Phase 4.
-2. `Timeout` reuse vs a `Task`-loop for the stall watchdog — Phase 4.
-3. Whether `URLSessionTaskTransactionMetrics.isReusedConnection` and the timestamp fields behave as expected through the AppSubsystem-provided `\.urlSession` (verify it is a plain foreground session; if it has a custom delegate wired at session level, confirm per-task delegates still receive `didFinishCollecting`) — Phase 5.
-4. The best-across-services reduction for multi-SIM RAT dictionaries — Phase 6.
-5. Approximation strategy for the probe budget (sliding window vs decayed counter) — Phase 7.
+1. Exact FirebaseStorage progress API shape available in the pinned SDK (`onProgress` overloads vs task-observer fallback) — Phase 0.
+2. Final names for the progress-reporting delegate methods, checked against local overload-resolution behavior — Phase 0.
+3. `Timeout` reuse vs a `Task`-loop for the stall watchdog — Phase 4.
+4. Whether `URLSessionTaskTransactionMetrics.isReusedConnection` and the timestamp fields behave as expected through the AppSubsystem-provided `\.urlSession` (verify it is a plain foreground session; if it has a custom delegate wired at session level, confirm per-task delegates still receive `didFinishCollecting`) — Phase 5.
+5. The best-across-services reduction for multi-SIM RAT dictionaries — Phase 6.
+6. Approximation strategy for the probe budget (sliding window vs decayed counter) — Phase 7.
