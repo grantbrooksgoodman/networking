@@ -229,12 +229,167 @@ final class CoreStorage: @unchecked Sendable {
         }
     }
 
+    // MARK: - Progress-Reporting Operations
+
+    func downloadItemWithProgress(
+        at path: String,
+        to localPath: URL,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        guard Networking.isReadWriteEnabled else {
+            continuation.finish(
+                throwing: Exception.Networking.readWriteAccessDisabled(
+                    .init(sender: self)
+                )
+            )
+
+            return stream
+        }
+
+        guard isOnline else {
+            continuation.finish(
+                throwing: Exception.internetConnectionOffline(
+                    metadata: .init(sender: self)
+                )
+            )
+
+            return stream
+        }
+
+        let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
+        let cacheStrategy = Self.resolvedStrategy(globalCacheStrategy ?? Self.resolvedStrategy(cacheStrategy))
+
+        let timeout = Timeout(after: duration) {
+            continuation.finish(
+                throwing: Exception.timedOut(
+                    metadata: .init(sender: self)
+                )
+            )
+        }
+
+        let task = Task { [weak self] in
+            guard let self else {
+                timeout.cancel()
+                continuation.finish(
+                    throwing: Exception(
+                        "Service has been deallocated.",
+                        metadata: .init(sender: Self.self)
+                    )
+                )
+
+                return
+            }
+
+            do throws(Exception) {
+                _ = try await downloadItem(
+                    at: path,
+                    to: localPath,
+                    cacheStrategy: cacheStrategy,
+                    onProgress: { continuation.yield($0) }
+                )
+
+                timeout.cancel()
+                continuation.finish()
+            } catch {
+                timeout.cancel()
+                continuation.finish(throwing: error)
+            }
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
+    }
+
+    func uploadWithProgress(
+        _ data: Data,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        guard Networking.isReadWriteEnabled else {
+            continuation.finish(
+                throwing: Exception.Networking.readWriteAccessDisabled(
+                    .init(sender: self)
+                )
+            )
+
+            return stream
+        }
+
+        guard isOnline else {
+            continuation.finish(
+                throwing: Exception.internetConnectionOffline(
+                    metadata: .init(sender: self)
+                )
+            )
+
+            return stream
+        }
+
+        let timeout = Timeout(after: duration) {
+            continuation.finish(
+                throwing: Exception.timedOut(
+                    metadata: .init(sender: self)
+                )
+            )
+        }
+
+        let task = Task { [weak self] in
+            guard let self else {
+                timeout.cancel()
+                continuation.finish(
+                    throwing: Exception(
+                        "Service has been deallocated.",
+                        metadata: .init(sender: Self.self)
+                    )
+                )
+
+                return
+            }
+
+            do throws(Exception) {
+                _ = try await upload(
+                    data,
+                    metadata: metadata,
+                    prependingEnvironment: prependingEnvironment,
+                    onProgress: { continuation.yield($0) }
+                )
+
+                timeout.cancel()
+                continuation.finish()
+            } catch {
+                timeout.cancel()
+                continuation.finish(throwing: error)
+            }
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
+    }
+
     // MARK: - Data Upload
 
     private func upload(
         _ data: Data,
         metadata: HostedItemMetadata,
-        prependingEnvironment: Bool
+        prependingEnvironment: Bool,
+        onProgress: (@Sendable (StorageTransferProgress) -> Void)? = nil
     ) async throws(Exception) -> Any? {
         Logger.log(
             "Uploading data to path \"\(metadata.filePath)\".",
@@ -246,19 +401,28 @@ final class CoreStorage: @unchecked Sendable {
         $storedItemExistsResults[metadata.filePath] = nil
 
         let healthStartTime = Date.now
+        let storageMetadata = metadata.asStorageMetadata(
+            prependingEnvironment: prependingEnvironment
+        )
 
-        do {
-            _ = try await firebaseStorage.putDataAsync(
+        if let onProgress {
+            try await putDataObservingProgress(
                 data,
-                metadata: metadata.asStorageMetadata(
-                    prependingEnvironment: prependingEnvironment
+                metadata: storageMetadata,
+                onProgress: onProgress
+            )
+        } else {
+            do {
+                _ = try await firebaseStorage.putDataAsync(
+                    data,
+                    metadata: storageMetadata
                 )
-            )
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
 
         let elapsed = Date.now.timeIntervalSince(healthStartTime)
@@ -415,7 +579,8 @@ final class CoreStorage: @unchecked Sendable {
     private func downloadItem(
         at path: String,
         to localPath: URL,
-        cacheStrategy: CacheStrategy
+        cacheStrategy: CacheStrategy,
+        onProgress: (@Sendable (StorageTransferProgress) -> Void)? = nil
     ) async throws(Exception) -> Any? {
         if cacheStrategy == .returnCacheFirst,
            storedDownloadItemResultIsValid(
@@ -435,7 +600,8 @@ final class CoreStorage: @unchecked Sendable {
         do {
             try await _downloadItem(
                 at: path,
-                to: localPath
+                to: localPath,
+                onProgress: onProgress
             )
         } catch {
             guard cacheStrategy == .returnCacheOnFailure,
@@ -542,21 +708,30 @@ final class CoreStorage: @unchecked Sendable {
 
     private func _downloadItem(
         at path: String,
-        to localPath: URL
+        to localPath: URL,
+        onProgress: (@Sendable (StorageTransferProgress) -> Void)? = nil
     ) async throws(Exception) {
         let healthStartTime = Date.now
 
-        do {
-            _ = try await firebaseStorage
-                .child(path)
-                .writeAsync(toFile: localPath)
-        } catch let error as Exception {
-            throw error
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
+        if let onProgress {
+            try await writeFileObservingProgress(
+                at: path,
+                to: localPath,
+                onProgress: onProgress
             )
+        } else {
+            do {
+                _ = try await firebaseStorage
+                    .child(path)
+                    .writeAsync(toFile: localPath)
+            } catch let error as Exception {
+                throw error
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
 
         let elapsed = Date.now.timeIntervalSince(healthStartTime)
@@ -818,6 +993,59 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Auxiliary
 
+    private func awaitTransferCompletion(
+        of task: StorageObservableTask,
+        cancellingWith cancelTransfer: @escaping @Sendable () -> Void,
+        onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+    ) async throws(Exception) {
+        do {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                    @LockIsolated var didResume = false
+                    var canResume: Bool {
+                        $didResume.withValue {
+                            guard !$0 else { return false }
+                            $0 = true
+                            return true
+                        }
+                    }
+
+                    task.observe(.progress) { snapshot in
+                        guard let progress = snapshot.progress else { return }
+                        onProgress(.init(
+                            completedBytes: progress.completedUnitCount,
+                            totalBytes: progress.totalUnitCount
+                        ))
+                    }
+
+                    task.observe(.success) { _ in
+                        guard canResume else { return }
+                        continuation.resume()
+                    }
+
+                    task.observe(.failure) { snapshot in
+                        guard canResume else { return }
+                        continuation.resume(
+                            throwing: snapshot.error ?? Exception(
+                                "The transfer failed without an underlying error.",
+                                metadata: .init(sender: self)
+                            )
+                        )
+                    }
+                }
+            } onCancel: {
+                cancelTransfer()
+            }
+        } catch let error as Exception {
+            throw error
+        } catch {
+            throw Exception(
+                error,
+                metadata: .init(sender: self)
+            )
+        }
+    }
+
     private func getFileMetadata(
         at path: String
     ) async throws(Exception) -> StorageMetadata {
@@ -829,6 +1057,24 @@ final class CoreStorage: @unchecked Sendable {
                 metadata: .init(sender: self)
             )
         }
+    }
+
+    private func putDataObservingProgress(
+        _ data: Data,
+        metadata: StorageMetadata,
+        onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+    ) async throws(Exception) {
+        let uploadTask = firebaseStorage.putData(
+            data,
+            metadata: metadata
+        )
+
+        let _uploadTask = LockIsolated(uploadTask)
+        try await awaitTransferCompletion(
+            of: uploadTask,
+            cancellingWith: { _uploadTask.wrappedValue.cancel() },
+            onProgress: onProgress
+        )
     }
 
     private func storedDownloadItemResultIsValid(
@@ -882,6 +1128,23 @@ final class CoreStorage: @unchecked Sendable {
         )
 
         return true
+    }
+
+    private func writeFileObservingProgress(
+        at path: String,
+        to localPath: URL,
+        onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+    ) async throws(Exception) {
+        let downloadTask = firebaseStorage
+            .child(path)
+            .write(toFile: localPath)
+
+        let _downloadTask = LockIsolated(downloadTask)
+        try await awaitTransferCompletion(
+            of: downloadTask,
+            cancellingWith: { _downloadTask.wrappedValue.cancel() },
+            onProgress: onProgress
+        )
     }
 }
 

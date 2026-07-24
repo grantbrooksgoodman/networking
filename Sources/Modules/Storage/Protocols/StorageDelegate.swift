@@ -144,6 +144,57 @@ public protocol StorageDelegate: Sendable {
         timeout duration: Duration
     ) async throws(Exception)
 
+    /// Downloads the item at the specified path to a
+    /// local file URL, reporting transfer progress.
+    ///
+    /// The returned stream yields a
+    /// ``StorageTransferProgress`` snapshot each time
+    /// the transfer advances, finishes when the
+    /// download completes, and throws an ``Exception``
+    /// if the download fails:
+    ///
+    /// ```swift
+    /// for try await progress in storage.downloadItemWithProgress(
+    ///     at: "videos/intro.mp4",
+    ///     to: localFileURL
+    /// ) {
+    ///     progressView.progress = Float(progress.fractionCompleted)
+    /// }
+    /// ```
+    ///
+    /// Cancelling the task that iterates the stream
+    /// cancels the transfer. A download satisfied by
+    /// cache finishes immediately with no progress
+    /// events.
+    ///
+    /// Progress-reporting operations are never
+    /// coalesced with identical concurrent operations.
+    /// All other behavior – timeouts, environment
+    /// prepending, and caching – is identical to
+    /// ``downloadItem(at:to:prependingEnvironment:cacheStrategy:timeout:)``.
+    ///
+    /// - Parameters:
+    ///   - path: The storage path of the item to
+    ///     download.
+    ///   - localPath: The local file URL to write to.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path.
+    ///   - cacheStrategy: The caching behavior for this
+    ///     operation.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func downloadItemWithProgress(
+        at path: String,
+        to localPath: URL,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error>
+
     /// Recursively finds all empty directories starting
     /// at the specified path.
     ///
@@ -281,6 +332,52 @@ public protocol StorageDelegate: Sendable {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception)
+
+    /// Uploads data to hosted storage with the specified
+    /// metadata, reporting transfer progress.
+    ///
+    /// The returned stream yields a
+    /// ``StorageTransferProgress`` snapshot each time
+    /// the transfer advances, finishes when the upload
+    /// completes, and throws an ``Exception`` if the
+    /// upload fails:
+    ///
+    /// ```swift
+    /// for try await progress in storage.uploadWithProgress(
+    ///     imageData,
+    ///     metadata: HostedItemMetadata("images/photo.png")
+    /// ) {
+    ///     progressView.progress = Float(progress.fractionCompleted)
+    /// }
+    /// ```
+    ///
+    /// Cancelling the task that iterates the stream
+    /// cancels the transfer.
+    ///
+    /// Progress-reporting operations are never
+    /// coalesced with identical concurrent operations.
+    /// All other behavior – timeouts and environment
+    /// prepending – is identical to
+    /// ``upload(_:metadata:prependingEnvironment:timeout:)``.
+    ///
+    /// - Parameters:
+    ///   - data: The data to upload.
+    ///   - metadata: The metadata describing the
+    ///     destination path and optional HTTP headers.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the metadata's file path.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func uploadWithProgress(
+        _ data: Data,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error>
 }
 
 public extension StorageDelegate {
@@ -421,6 +518,100 @@ public extension StorageDelegate {
             at: path,
             to: localPath,
             prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+    }
+
+    /// Downloads the item at the specified path to a
+    /// local file URL, reporting transfer progress.
+    ///
+    /// This default implementation wraps
+    /// ``downloadItem(at:to:prependingEnvironment:cacheStrategy:timeout:)``
+    /// and reports no progress events – the stream
+    /// finishes when the download completes, or throws
+    /// the download's ``Exception`` on failure.
+    /// Implement this requirement in a custom
+    /// conformance to report real progress.
+    ///
+    /// - Parameters:
+    ///   - path: The storage path of the item to
+    ///     download.
+    ///   - localPath: The local file URL to write to.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path.
+    ///   - cacheStrategy: The caching behavior for this
+    ///     operation.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func downloadItemWithProgress(
+        at path: String,
+        to localPath: URL,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        let task = Task {
+            do throws(Exception) {
+                try await downloadItem(
+                    at: path,
+                    to: localPath,
+                    prependingEnvironment: prependingEnvironment,
+                    cacheStrategy: cacheStrategy,
+                    timeout: duration
+                )
+
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
+    }
+
+    /// Downloads the item at the specified path to a
+    /// local file URL, reporting transfer progress.
+    ///
+    /// This method calls
+    /// ``downloadItemWithProgress(at:to:prependingEnvironment:cacheStrategy:timeout:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - path: The storage path of the item to
+    ///     download.
+    ///   - localPath: The local file URL to write to.
+    ///   - cacheStrategy: The caching behavior for this
+    ///     operation. The default is
+    ///     ``CacheStrategy/returnCacheFirst``.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func downloadItemWithProgress(
+        at path: String,
+        to localPath: URL,
+        cacheStrategy: CacheStrategy = .returnCacheFirst,
+        timeout duration: Duration = Networking.defaultOperationTimeout
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        downloadItemWithProgress(
+            at: path,
+            to: localPath,
+            prependingEnvironment: true,
             cacheStrategy: cacheStrategy,
             timeout: duration
         )
@@ -600,6 +791,91 @@ public extension StorageDelegate {
             data,
             metadata: metadata,
             prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
+    /// Uploads data to hosted storage with the specified
+    /// metadata, reporting transfer progress.
+    ///
+    /// This default implementation wraps
+    /// ``upload(_:metadata:prependingEnvironment:timeout:)``
+    /// and reports no progress events – the stream
+    /// finishes when the upload completes, or throws
+    /// the upload's ``Exception`` on failure.
+    /// Implement this requirement in a custom
+    /// conformance to report real progress.
+    ///
+    /// - Parameters:
+    ///   - data: The data to upload.
+    ///   - metadata: The metadata describing the
+    ///     destination path and optional HTTP headers.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the metadata's file path.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func uploadWithProgress(
+        _ data: Data,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
+            bufferingPolicy: .unbounded
+        )
+
+        let task = Task {
+            do throws(Exception) {
+                try await upload(
+                    data,
+                    metadata: metadata,
+                    prependingEnvironment: prependingEnvironment,
+                    timeout: duration
+                )
+
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+
+        continuation.onTermination = { _ in
+            task.cancel()
+        }
+
+        return stream
+    }
+
+    /// Uploads data to hosted storage with the specified
+    /// metadata, reporting transfer progress.
+    ///
+    /// This method calls
+    /// ``uploadWithProgress(_:metadata:prependingEnvironment:timeout:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - data: The data to upload.
+    ///   - metadata: The metadata describing the
+    ///     destination path and optional HTTP headers.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Returns: An asynchronous stream of transfer
+    ///   progress snapshots.
+    func uploadWithProgress(
+        _ data: Data,
+        metadata: HostedItemMetadata,
+        timeout duration: Duration = Networking.defaultOperationTimeout
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        uploadWithProgress(
+            data,
+            metadata: metadata,
+            prependingEnvironment: true,
             timeout: duration
         )
     }

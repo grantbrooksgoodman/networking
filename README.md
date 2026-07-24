@@ -683,6 +683,23 @@ let directoryListing = try await storage.getDirectoryListing(
 )
 ```
 
+#### Observing Transfer Progress
+
+Use the progress-reporting variants of `upload` and `downloadItem` to drive UI such as progress bars. Each returns an `AsyncThrowingStream` of [`StorageTransferProgress`](Sources/Modules/Storage/Models/Public/StorageTransferProgress.swift) snapshots that yields as the transfer advances, finishes when it completes, and throws an `Exception` on failure:
+
+```swift
+for try await progress in storage.uploadWithProgress(
+    videoData,
+    metadata: HostedItemMetadata("videos/intro.mp4")
+) {
+    progressView.progress = Float(progress.fractionCompleted)
+}
+```
+
+Cancelling the task that iterates the stream cancels the transfer. A download satisfied by cache finishes immediately with no progress events. Custom `StorageDelegate` conformances that do not implement the progress-reporting requirements fall back to a progress-silent default – the operation still completes, but no snapshots are yielded.
+
+Progress-reporting operations are never coalesced with identical concurrent operations (see [Operation Coalescing](#operation-coalescing)).
+
 #### Supporting Types
 
 | Type | Purpose |
@@ -690,6 +707,7 @@ let directoryListing = try await storage.getDirectoryListing(
 | [`DirectoryListing`](Sources/Modules/Storage/Models/Public/DirectoryListing.swift) | A snapshot of file paths and subdirectory names at a given storage path. |
 | [`HostedItemMetadata`](Sources/Modules/Storage/Models/Public/HostedItemMetadata.swift) | Metadata for a file upload, including the destination path and optional HTTP headers. |
 | [`HostedItemType`](Sources/Modules/Storage/Models/Public/HostedItemType.swift) | Identifies whether a storage item is a file or a directory. |
+| [`StorageTransferProgress`](Sources/Modules/Storage/Models/Public/StorageTransferProgress.swift) | A snapshot of a transfer's progress, yielded by the progress-reporting operations. |
 
 ### Translation
 
@@ -730,6 +748,8 @@ Both calls return immediately. Connection establishment proceeds in the backgrou
 The default database and storage implementations automatically coalesce identical concurrent operations. When multiple callers perform the same operation at the same time, only a single network request is made and all callers receive the same result. Two operations are considered identical when they share the same parameters – including path, cache strategy, and – for write operations – payload.
 
 This deduplication is transparent and requires no additional configuration.
+
+Progress-reporting operations (`uploadWithProgress` and `downloadItemWithProgress`) are the exception – they are never coalesced. Coalescing delivers a single shared result to all callers, which would leave all but one caller without progress events. Each progress-reporting call therefore performs its own transfer.
 
 ### Adaptive Caching
 

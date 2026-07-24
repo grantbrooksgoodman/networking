@@ -46,6 +46,20 @@ struct Storage: StorageDelegate {
         )
     }
 
+    func uploadWithProgress(
+        _ data: Data,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        coreStorage.uploadWithProgress(
+            data,
+            metadata: metadata,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
     // MARK: - Deletion
 
     func deleteAllItems(
@@ -115,6 +129,22 @@ struct Storage: StorageDelegate {
                 cacheStrategy: cacheStrategy
             ),
             prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
+    func downloadItemWithProgress(
+        at path: String,
+        to localPath: URL,
+        prependingEnvironment: Bool,
+        cacheStrategy: CacheStrategy,
+        timeout duration: Duration
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        coreStorage.downloadItemWithProgress(
+            at: path,
+            to: localPath,
+            prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
             timeout: duration
         )
     }
