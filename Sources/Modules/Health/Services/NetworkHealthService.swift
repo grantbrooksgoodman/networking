@@ -51,6 +51,14 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         return health
     }
 
+    private var estimatorContext: EstimatorContext {
+        .init(
+            configuration: Networking.config.networkHealthConfiguration,
+            isOnline: isOnline,
+            pathState: _pathState.wrappedValue
+        )
+    }
+
     // MARK: - Init
 
     private nonisolated init() {}
@@ -66,31 +74,20 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             )
         }
 
-        Task {
-            let updated = await estimator.record(
+        updateHealth { estimator, context in
+            await estimator.record(
                 event: event,
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
+                context: context
             )
-
-            publish(updated)
         }
     }
 
     func recordCensoredLatencySample(seconds: TimeInterval) {
         startConnectionStabilityMonitoringIfNeeded()
-
-        Task {
-            let updated = await estimator.recordCensoredLatency(
-                seconds: seconds,
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
-            )
-
-            publish(updated)
-        }
+        submitLatencySample(
+            seconds: seconds,
+            isCensored: true
+        )
     }
 
     func recordLatencySample(seconds: TimeInterval) {
@@ -102,16 +99,12 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         bytes: Int,
         seconds: TimeInterval
     ) {
-        Task {
-            let updated = await estimator.recordThroughput(
+        updateHealth { estimator, context in
+            await estimator.recordThroughput(
                 bytes: bytes,
                 seconds: seconds,
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
+                context: context
             )
-
-            publish(updated)
         }
     }
 
@@ -144,10 +137,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     func debugSummary() async -> String {
         let configuration = Networking.config.networkHealthConfiguration
-        let summary = await estimator.debugSummary(
-            halfLife: configuration.halfLife,
-            pathState: _pathState.wrappedValue
-        )
+        let summary = await estimator.debugSummary(context: estimatorContext)
 
         let scoreDescription = health.score.map { String(format: "%.2f", $0) } ?? "unknown"
         let tierDescription = health.tier?.rawValue ?? "unknown"
@@ -201,16 +191,9 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             return
         }
 
-        Task {
+        updateHealth { estimator, context in
             await estimator.resetConfidence()
-
-            let updated = await estimator.computeHealth(
-                isOnline: isOnline,
-                pathState: newState,
-                configuration: Networking.config.networkHealthConfiguration
-            )
-
-            publish(updated)
+            return await estimator.computeHealth(context: context)
         }
 
         // Give the new path a moment to settle before probing
@@ -228,14 +211,8 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
         guard didChange else { return }
 
-        Task {
-            let updated = await estimator.computeHealth(
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
-            )
-
-            publish(updated)
+        updateHealth { estimator, context in
+            await estimator.computeHealth(context: context)
         }
     }
 
@@ -340,16 +317,25 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     /// Feeds a latency sample into the estimator without the
     /// connection-stability attach trigger – probe round-trips
     /// are not evidence of realtime database use.
-    private func submitLatencySample(seconds: TimeInterval) {
-        Task {
-            let updated = await estimator.recordLatency(
+    private func submitLatencySample(
+        seconds: TimeInterval,
+        isCensored: Bool = false
+    ) {
+        updateHealth { estimator, context in
+            await estimator.recordLatency(
                 seconds: seconds,
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
+                isCensored: isCensored,
+                context: context
             )
+        }
+    }
 
-            publish(updated)
+    /// Runs an estimator update off the caller's thread –
+    /// recording stays fire-and-forget – and publishes the
+    /// resulting health value.
+    private func updateHealth(_ update: @escaping @Sendable (HealthEstimator, EstimatorContext) async -> NetworkHealth) {
+        Task {
+            await publish(update(estimator, estimatorContext))
         }
     }
 }
@@ -382,12 +368,11 @@ private actor HealthEstimator {
 
     // MARK: - Methods
 
-    func computeHealth(
-        isOnline: Bool,
-        pathState: PathState,
-        configuration: NetworkHealthConfiguration
-    ) -> NetworkHealth {
-        guard isOnline else {
+    func computeHealth(context: EstimatorContext) -> NetworkHealth {
+        let configuration = context.configuration
+        let pathState = context.pathState
+
+        guard context.isOnline else {
             return .measured(
                 score: 0,
                 tier: .poor
@@ -481,11 +466,10 @@ private actor HealthEstimator {
         )
     }
 
-    func debugSummary(
-        halfLife: TimeInterval,
-        pathState: PathState
-    ) -> String {
+    func debugSummary(context: EstimatorContext) -> String {
+        let halfLife = context.configuration.halfLife
         let now = Date.now
+        let pathState = context.pathState
 
         let latencyMean = latencyChannel.mean
         let latencyConfidence = latencyChannel.decayedWeight(
@@ -535,16 +519,16 @@ private actor HealthEstimator {
 
     func record(
         event: NetworkHealthEvent,
-        isOnline: Bool,
-        pathState: PathState,
-        configuration: NetworkHealthConfiguration
+        context: EstimatorContext
     ) -> NetworkHealth {
+        let halfLife = context.configuration.halfLife
+
         switch event {
         case .connectionFlap:
             flapChannel.record(
                 sample: 1,
                 at: .now,
-                halfLife: configuration.halfLife
+                halfLife: halfLife
             )
 
         case .connectionRestored:
@@ -556,20 +540,20 @@ private actor HealthEstimator {
             latencyChannel.record(
                 sample: seconds,
                 at: .now,
-                halfLife: configuration.halfLife
+                halfLife: halfLife
             )
 
         case let .probeFailure(timeoutSeconds):
             failureChannel.record(
                 sample: 1,
                 at: .now,
-                halfLife: configuration.halfLife
+                halfLife: halfLife
             )
 
             latencyChannel.record(
                 sample: timeoutSeconds,
                 at: .now,
-                halfLife: configuration.halfLife
+                halfLife: halfLife
             )
 
         case .transferStall:
@@ -578,81 +562,44 @@ private actor HealthEstimator {
             failureChannel.record(
                 sample: 1,
                 at: .now,
-                halfLife: configuration.halfLife
+                halfLife: halfLife
             )
         }
 
-        return computeHealth(
-            isOnline: isOnline,
-            pathState: pathState,
-            configuration: configuration
-        )
-    }
-
-    func recordCensoredLatency(
-        seconds: TimeInterval,
-        isOnline: Bool,
-        pathState: PathState,
-        configuration: NetworkHealthConfiguration
-    ) -> NetworkHealth {
-        latencyChannel.record(
-            sample: seconds,
-            at: .now,
-            halfLife: configuration.halfLife
-        )
-
-        // A timeout is the failure signal.
-        failureChannel.record(
-            sample: 1,
-            at: .now,
-            halfLife: configuration.halfLife
-        )
-
-        return computeHealth(
-            isOnline: isOnline,
-            pathState: pathState,
-            configuration: configuration
-        )
+        return computeHealth(context: context)
     }
 
     func recordLatency(
         seconds: TimeInterval,
-        isOnline: Bool,
-        pathState: PathState,
-        configuration: NetworkHealthConfiguration
+        isCensored: Bool,
+        context: EstimatorContext
     ) -> NetworkHealth {
+        let halfLife = context.configuration.halfLife
+
         latencyChannel.record(
             sample: seconds,
             at: .now,
-            halfLife: configuration.halfLife
+            halfLife: halfLife
         )
 
+        // A timeout is the failure signal; a completed
+        // round-trip is a success.
         failureChannel.record(
-            sample: 0,
+            sample: isCensored ? 1 : 0,
             at: .now,
-            halfLife: configuration.halfLife
+            halfLife: halfLife
         )
 
-        return computeHealth(
-            isOnline: isOnline,
-            pathState: pathState,
-            configuration: configuration
-        )
+        return computeHealth(context: context)
     }
 
     func recordThroughput(
         bytes: Int,
         seconds: TimeInterval,
-        isOnline: Bool,
-        pathState: PathState,
-        configuration: NetworkHealthConfiguration
+        context: EstimatorContext
     ) -> NetworkHealth {
-        guard bytes >= configuration.minimumThroughputSampleBytes else {
-            return computeHealth(
-                isOnline: isOnline,
-                pathState: pathState,
-                configuration: configuration
-            )
+        guard bytes >= context.configuration.minimumThroughputSampleBytes else {
+            return computeHealth(context: context)
         }
 
         let bytesPerSecond = Double(bytes) / max(seconds, 0.001)
@@ -661,14 +608,10 @@ private actor HealthEstimator {
         throughputChannel.record(
             sample: log2(bytesPerSecond),
             at: .now,
-            halfLife: configuration.halfLife
+            halfLife: context.configuration.halfLife
         )
 
-        return computeHealth(
-            isOnline: isOnline,
-            pathState: pathState,
-            configuration: configuration
-        )
+        return computeHealth(context: context)
     }
 
     func resetConfidence() {
@@ -745,4 +688,16 @@ private actor HealthEstimator {
 
         return min(max(penalty, 0), 1)
     }
+}
+
+// MARK: - EstimatorContext
+
+/// A point-in-time snapshot of the estimator's inputs,
+/// captured when an update executes.
+private struct EstimatorContext {
+    // MARK: - Properties
+
+    let configuration: NetworkHealthConfiguration
+    let isOnline: Bool
+    let pathState: PathState
 }

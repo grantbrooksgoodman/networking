@@ -8,12 +8,13 @@
 /* Native */
 import Foundation
 
-/// Configuration parameters for passive network health estimation.
+/// Configuration parameters for network health estimation.
 ///
 /// All scoring constants – half-life, ramp anchors, channel weights,
-/// penalties, trust gates, and tier boundaries – are collected in
-/// this single value type. Modify the active configuration at
-/// runtime through
+/// penalties, priors, trust gates, and tier boundaries – are
+/// collected in this single value type, along with the passive
+/// signal opt-outs and the opt-in ``probeConfiguration``. Modify
+/// the active configuration at runtime through
 /// ``Networking/Config/setNetworkHealthConfiguration(_:)``.
 public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     // MARK: - Properties

@@ -652,19 +652,66 @@ Networking.config.setNetworkHealthConfiguration(configuration)
 
 The default configuration is suitable for most apps. Adjust individual parameters only when you have specific requirements for sensitivity or scoring behavior.
 
+| Parameter | Default | Description |
+|---|---|---|
+| `adaptiveScoreThreshold` | `0.3` | Score below which `.adaptive` caching resolves to `.returnCacheFirst`. |
+| `channelWeightLatency` | `0.6` | Relative weight of the latency channel in the blended score. |
+| `channelWeightThroughput` | `0.4` | Relative weight of the throughput channel in the blended score. |
+| `constrainedPenalty` | `0.9` | Multiplicative penalty on constrained paths. |
+| `expensivePenalty` | `0.95` | Multiplicative penalty on expensive paths. |
+| `failureRatePenaltyWeight` | `0.5` | Weight of the failure-rate penalty; `0` disables it. |
+| `fairTierThreshold` | `0.3` | Score at or above which health is `.fair`. |
+| `flapForegroundGraceSeconds` | `10` | Post-foregrounding window during which socket drops are not flaps. |
+| `goodTierThreshold` | `0.7` | Score at or above which health is `.good`. |
+| `halfLife` | `30` | Half-life, in seconds, of the sample decay. |
+| `intermediateRadioScoreCap` | `0.75` | Maximum score on 3G-class cellular technologies. |
+| `isConnectionStabilityMonitoringEnabled` | `true` | Whether realtime connection stability is monitored. |
+| `isRadioTechnologyPriorEnabled` | `true` | Whether radio technology caps the score on cellular paths. |
+| `isURLSessionMetricsEnabled` | `true` | Whether the framework's own HTTPS requests contribute evidence. |
+| `jitterPenaltyWeight` | `0.3` | Weight of the per-channel jitter reduction; `0` disables it. |
+| `latencyCeiling` | `3` | Latency, in seconds, mapping to a score of approximately zero. |
+| `latencyFloor` | `0.1` | Latency, in seconds, mapping to a score of approximately one. |
+| `latencyJitterCeiling` | `1.0` | Latency coefficient of variation at which the jitter reduction saturates. |
+| `legacyRadioScoreCap` | `0.4` | Maximum score on 2G-class cellular technologies. |
+| `minimumConfidence` | `0.5` | Aggregate confidence required to report a measured value. |
+| `minimumThroughputSampleBytes` | `51200` | Minimum transfer size recorded as a throughput sample. |
+| `probeConfiguration` | `nil` | Opt-in active probing configuration; `nil` disables probing. |
+| `stabilityFlapCeiling` | `3` | Decayed flap count at which the stability penalty saturates. |
+| `stabilityPenaltyWeight` | `0.4` | Weight of the connection-stability penalty; `0` disables it. |
+| `throughputCeiling` | `22.0` | log₂(bytes per second) mapping to a score of approximately one. |
+| `throughputFloor` | `13.0` | log₂(bytes per second) mapping to a score of approximately zero. |
+| `throughputJitterCeiling` | `2.0` | Throughput standard deviation at which the jitter reduction saturates. |
+| `transferStallCheckInterval` | `2` | Interval, in seconds, between stall checks on active transfers. |
+| `transferStallSeconds` | `8` | Progress-free duration after which a transfer is considered stalled. |
+
 #### Instrumentation
 
-Health estimation is built into the default Firebase-backed database and storage implementations. Database operations contribute latency samples; storage uploads and downloads contribute throughput samples. Cache hits, coalesced operations, and offline failures are automatically excluded.
+Health estimation is built into the default Firebase-backed database and storage implementations, and draws on three kinds of input.
 
-Large storage transfers are sampled continuously while in flight – each segment of transferred bytes that reaches the minimum sample size contributes its own throughput sample, so the estimate learns about a long transfer as it happens rather than only at completion. A transfer whose progress freezes for `transferStallSeconds` contributes failure evidence (a stall) before its timeout fires.
+**Measurements** – direct observations that feed the latency and throughput channels:
 
-Database operation timeouts also contribute failure evidence, which penalizes the score while recent. High dispersion in a channel's sample history (jitter) reduces that channel's contribution – an unstable connection scores lower than a steady one with the same averages.
+- *Latency* – round-trip times of database operations. Timeouts contribute censored samples bounded by the timeout duration – the strongest single piece of negative evidence.
+- *Throughput* – storage transfer speeds. Large transfers are sampled continuously while in flight: each segment of transferred bytes that reaches the minimum sample size contributes its own sample, so the estimate learns about a long transfer as it happens rather than only at completion.
+- *Handshake* – DNS-plus-connect timing of fresh connections from the framework's own HTTPS requests (Gemini enhancement). Total request duration is never recorded – inference time would poison the estimate. Traffic from the external Translator package is out of scope.
+- *Probe round-trips* – when active probing is enabled (see below).
 
-The framework's own HTTPS requests (Gemini enhancement) contribute passive connection metrics: a fresh connection's DNS-plus-connect handshake feeds the latency channel, large responses feed the throughput channel, and network-level request failures contribute failure evidence. Total request duration is never recorded – inference time would poison the estimate. Set `isURLSessionMetricsEnabled` to `false` to feed the estimator exclusively from Firebase traffic. Traffic from the external Translator package is out of scope – its multi-platform fallback and retry semantics would pollute the latency signal.
+**Derived statistics** – penalties computed from the sample history:
 
-On cellular paths, the device's radio access technology acts as a prior: 2G-class technologies cap the reportable score at `legacyRadioScoreCap` and 3G-class technologies at `intermediateRadioScoreCap`, while modern and unrecognized technologies have no effect. Measurements always speak first – the cap never raises the score, and only stops a starved estimator from over-reporting on legacy radio. Disable with `isRadioTechnologyPriorEnabled`.
+- *Jitter* – high dispersion in a channel's samples reduces that channel's contribution. An unstable connection scores lower than a steady one with the same averages.
+- *Failure rate* – database operation timeouts, transfer stalls, and network-level request failures contribute failure evidence that penalizes the score while recent. A transfer whose progress freezes for `transferStallSeconds` contributes a stall before its timeout fires.
+- *Stability* – unexpected realtime socket drops in the foreground (flaps) penalize the score while recent. Drops that coincide with going offline, backgrounding, or the grace period after foregrounding are ignored.
 
-When the app uses the realtime database, the health system additionally monitors the realtime client's own connection state. Unexpected socket drops in the foreground (flaps) penalize the score while recent; drops that coincide with going offline, backgrounding, or the grace period after foregrounding are ignored. Because an attached observer keeps the realtime connection alive, the observer attaches lazily – only after the first database operation produces a latency sample – so apps that use only storage or authentication never open a realtime connection. Set `isConnectionStabilityMonitoringEnabled` to `false` to disable this signal entirely.
+**Priors and policies** – bounds that shape the score without ever creating or raising evidence:
+
+- *Path penalties* – constrained and expensive paths apply multiplicative penalties.
+- *Radio access technology caps* – on cellular paths, 2G-class technologies cap the reportable score at `legacyRadioScoreCap` and 3G-class technologies at `intermediateRadioScoreCap`. Modern and unrecognized technologies have no effect; measurements always speak first.
+- *Offline hard zero* – while the device is offline, health reports a score of `0` immediately.
+
+Cache hits, coalesced operations, and offline failures are automatically excluded from all channels.
+
+Because an attached connection-state observer keeps the realtime connection alive, stability monitoring attaches lazily – only after the first database operation produces a latency sample – so apps that use only storage or authentication never open a realtime connection.
+
+Two passive signals can be disabled independently: set `isConnectionStabilityMonitoringEnabled` to `false` to stop observing the realtime client's connection state, or `isURLSessionMetricsEnabled` to `false` to feed the estimator exclusively from Firebase traffic.
 
 Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
 
