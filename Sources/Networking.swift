@@ -125,9 +125,10 @@ public enum Networking {
         AppCheck.configure()
         FirebaseApp.configure()
         didInitialize = true
-        DevModeService.insertAction(.switchEnvironmentAction, at: 0)
-        DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 1)
-        DevModeService.insertAction(.inspectNetworkHealthAction, at: 2)
+
+        DevModeService.insertAction(.inspectNetworkHealthAction, at: 0)
+        DevModeService.insertAction(.switchEnvironmentAction, at: 1)
+        DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 2)
 
         Task.background {
             config.healthDelegate.startMonitoring()

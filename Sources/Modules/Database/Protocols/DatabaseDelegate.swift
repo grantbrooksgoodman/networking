@@ -445,7 +445,7 @@ public extension DatabaseDelegate {
     /// specified path each time it changes.
     ///
     /// This method calls
-    /// ``observe(at:prependingEnvironment:)``
+    /// ``observe(path:prependingEnvironment:)``
     /// with default parameter values.
     ///
     /// - Parameters:

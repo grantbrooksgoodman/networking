@@ -602,6 +602,8 @@ The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum
 
 The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs.
 
+> **Note:** Health monitoring starts automatically when you call `Networking.initialize()`. No additional setup is required.
+
 #### Reading Health
 
 Access the current health value synchronously through the delegate:

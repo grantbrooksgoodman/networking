@@ -53,7 +53,7 @@ struct NetworkActivityIndicator: View {
                     .tint(viewModel.progressViewTintColor)
             }
             .if(UIApplication.isFullyV26Compatible) {
-                $0.glassEffect( // TODO: Audit the isClear set here.
+                $0.glassEffect(
                     isClear: viewModel.backgroundColor == nil,
                     padding: -1,
                     shape: Circle(),
