@@ -6,6 +6,9 @@
 //
 
 /* Native */
+#if canImport(CoreTelephony) && !os(macOS)
+import CoreTelephony
+#endif
 import Foundation
 import Network
 
@@ -18,6 +21,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.build.isOnline) private var isOnline: Bool
+    @Dependency(\.notificationCenter) private var notificationCenter: NotificationCenter
 
     // MARK: - Properties
 
@@ -29,6 +33,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     private let _health = LockIsolated<NetworkHealth>(.unknown)
     private let _pathMonitor = LockIsolated<NWPathMonitor?>(nil)
     private let _pathState = LockIsolated<PathState>(.init())
+    private let _radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
 
     // MARK: - Computed Properties
 
@@ -118,6 +123,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
         monitor.start(queue: monitorQueue)
         _pathMonitor.wrappedValue = monitor
+        registerRadioTechnologyObserver()
     }
 
     func stopMonitoring() {
@@ -131,6 +137,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         }
 
         connectionStabilityObserver?.stop()
+        removeRadioTechnologyObserver()
     }
 
     // MARK: - Methods
@@ -170,7 +177,8 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         let newState = PathState(
             interfaceType: path.availableInterfaces.first?.type,
             isConstrained: path.isConstrained,
-            isExpensive: path.isExpensive
+            isExpensive: path.isExpensive,
+            radioTechnology: RadioTechnology.current
         )
 
         let previousInterfaceType = _pathState.wrappedValue.interfaceType
@@ -197,6 +205,27 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         }
     }
 
+    private func handleRadioTechnologyChange() {
+        let radioTechnology = RadioTechnology.current
+        let didChange: Bool = _pathState.projectedValue.withValue { pathState in
+            guard pathState.radioTechnology != radioTechnology else { return false }
+            pathState.radioTechnology = radioTechnology
+            return true
+        }
+
+        guard didChange else { return }
+
+        Task {
+            let updated = await estimator.computeHealth(
+                isOnline: isOnline,
+                pathState: _pathState.wrappedValue,
+                configuration: Networking.config.networkHealthConfiguration
+            )
+
+            publish(updated)
+        }
+    }
+
     private func publish(_ health: NetworkHealth) {
         let previousTier = _health.wrappedValue.tier
         _health.wrappedValue = health
@@ -209,6 +238,33 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             domain: .Networking.health,
             sender: self
         )
+    }
+
+    private func registerRadioTechnologyObserver() {
+        #if canImport(CoreTelephony) && !os(macOS)
+        let observer = notificationCenter.addObserver(
+            forName: .CTServiceRadioAccessTechnologyDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.handleRadioTechnologyChange()
+        }
+
+        _radioTechnologyObserver.wrappedValue = observer
+        #endif
+    }
+
+    private func removeRadioTechnologyObserver() {
+        #if canImport(CoreTelephony) && !os(macOS)
+        let observer = _radioTechnologyObserver.projectedValue.withValue { observer -> (any NSObjectProtocol)? in
+            let current = observer
+            observer = nil
+            return current
+        }
+
+        guard let observer else { return }
+        notificationCenter.removeObserver(observer)
+        #endif
     }
 
     /// Lazily attaches the connection stability observer on the
@@ -338,6 +394,22 @@ private actor HealthEstimator {
 
         score = min(max(score, 0), 1)
 
+        // A prior, never a boost: measurements always speak
+        // first; the cap only stops a starved estimator from
+        // over-reporting on legacy cellular technology.
+        if configuration.isRadioTechnologyPriorEnabled,
+           pathState.interfaceType == .cellular {
+            switch pathState.radioTechnology {
+            case .intermediate:
+                score = min(score, configuration.intermediateRadioScoreCap)
+            case .legacy:
+                score = min(score, configuration.legacyRadioScoreCap)
+            case .modern,
+                 .unknown:
+                break
+            }
+        }
+
         return .measured(
             score: score,
             tier: configuration.tier(for: score)
@@ -378,7 +450,7 @@ private actor HealthEstimator {
         } ?? "none"
 
         return String(
-            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nLast transfer: %@, Stalls: %d\nConstrained: %@, Expensive: %@",
+            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nLast transfer: %@, Stalls: %d\nConstrained: %@, Expensive: %@, Radio: %@",
             latencyMean,
             latencyDispersion,
             latencyConfidence,
@@ -391,7 +463,8 @@ private actor HealthEstimator {
             lastTransferDescription,
             stallCount,
             pathState.isConstrained.description,
-            pathState.isExpensive.description
+            pathState.isExpensive.description,
+            pathState.radioTechnology.rawValue
         )
     }
 

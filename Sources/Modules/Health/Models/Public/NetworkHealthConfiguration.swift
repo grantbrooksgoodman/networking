@@ -93,6 +93,15 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `30` seconds.
     public var halfLife: TimeInterval
 
+    /// The maximum score reportable on 3G-class cellular
+    /// technologies (WCDMA, HSPA, EV-DO, eHRPD).
+    ///
+    /// The cap applies only when the current path is cellular
+    /// and ``isRadioTechnologyPriorEnabled`` is `true`.
+    ///
+    /// Default value is `0.75`.
+    public var intermediateRadioScoreCap: Double
+
     /// A Boolean value that determines whether the realtime
     /// client's connection stability is monitored as health
     /// evidence.
@@ -107,6 +116,20 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     ///
     /// Default value is `true`.
     public var isConnectionStabilityMonitoringEnabled: Bool
+
+    /// A Boolean value that determines whether the device's
+    /// cellular radio access technology caps the health score.
+    ///
+    /// When enabled and the current path is cellular, legacy
+    /// radio technologies cap the reportable score –
+    /// ``legacyRadioScoreCap`` for 2G-class,
+    /// ``intermediateRadioScoreCap`` for 3G-class. Modern and
+    /// unrecognized technologies have no effect. The cap is a
+    /// prior, not a measurement – it never raises the score
+    /// and never affects confidence.
+    ///
+    /// Default value is `true`.
+    public var isRadioTechnologyPriorEnabled: Bool
 
     /// A Boolean value that determines whether URLSession
     /// transaction metrics from the framework's own HTTPS
@@ -154,6 +177,15 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     ///
     /// Default value is `1.0`.
     public var latencyJitterCeiling: Double
+
+    /// The maximum score reportable on 2G-class cellular
+    /// technologies (GPRS, EDGE, CDMA 1x).
+    ///
+    /// The cap applies only when the current path is cellular
+    /// and ``isRadioTechnologyPriorEnabled`` is `true`.
+    ///
+    /// Default value is `0.4`.
+    public var legacyRadioScoreCap: Double
 
     /// The minimum aggregate channel confidence required to
     /// produce a ``NetworkHealth/measured(score:tier:)`` value.
@@ -242,12 +274,15 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         flapForegroundGraceSeconds: TimeInterval = 10,
         goodTierThreshold: Double = 0.7,
         halfLife: TimeInterval = 30,
+        intermediateRadioScoreCap: Double = 0.75,
         isConnectionStabilityMonitoringEnabled: Bool = true,
+        isRadioTechnologyPriorEnabled: Bool = true,
         isURLSessionMetricsEnabled: Bool = true,
         jitterPenaltyWeight: Double = 0.3,
         latencyCeiling: TimeInterval = 3,
         latencyFloor: TimeInterval = 0.1,
         latencyJitterCeiling: Double = 1,
+        legacyRadioScoreCap: Double = 0.4,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
         stabilityFlapCeiling: Double = 3,
@@ -268,12 +303,15 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         self.flapForegroundGraceSeconds = flapForegroundGraceSeconds
         self.goodTierThreshold = goodTierThreshold
         self.halfLife = halfLife
+        self.intermediateRadioScoreCap = intermediateRadioScoreCap
         self.isConnectionStabilityMonitoringEnabled = isConnectionStabilityMonitoringEnabled
+        self.isRadioTechnologyPriorEnabled = isRadioTechnologyPriorEnabled
         self.isURLSessionMetricsEnabled = isURLSessionMetricsEnabled
         self.jitterPenaltyWeight = jitterPenaltyWeight
         self.latencyCeiling = latencyCeiling
         self.latencyFloor = latencyFloor
         self.latencyJitterCeiling = latencyJitterCeiling
+        self.legacyRadioScoreCap = legacyRadioScoreCap
         self.minimumConfidence = minimumConfidence
         self.minimumThroughputSampleBytes = minimumThroughputSampleBytes
         self.stabilityFlapCeiling = stabilityFlapCeiling
