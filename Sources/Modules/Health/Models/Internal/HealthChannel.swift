@@ -72,8 +72,7 @@ struct HealthChannel {
             mean = sample
             secondMoment = sample * sample
             weight = 1
-            lastUpdate = time
-            return
+            return lastUpdate = time
         }
 
         let elapsed = time.timeIntervalSince(lastUpdate)

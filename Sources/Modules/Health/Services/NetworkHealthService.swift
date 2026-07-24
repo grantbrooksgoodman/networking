@@ -197,6 +197,20 @@ private actor HealthEstimator {
     private var latencyChannel = HealthChannel()
     private var throughputChannel = HealthChannel()
 
+    // MARK: - Computed Properties
+
+    /// The latency channel's coefficient of variation – the
+    /// standard deviation of its samples relative to their mean.
+    private var latencyDispersion: Double {
+        latencyChannel.standardDeviation / max(latencyChannel.mean, 0.001)
+    }
+
+    /// The throughput channel's standard deviation, in
+    /// log₂(bytes per second) units, which are already relative.
+    private var throughputDispersion: Double {
+        throughputChannel.standardDeviation
+    }
+
     // MARK: - Methods
 
     func computeHealth(
@@ -235,20 +249,31 @@ private actor HealthEstimator {
             mean: log2(max(latencyChannel.mean, 0.001)),
             floor: log2(configuration.latencyFloor),
             ceiling: log2(configuration.latencyCeiling),
-            inverted: true
+            inverted: true,
+            dispersion: latencyDispersion,
+            jitterCeiling: configuration.latencyJitterCeiling,
+            jitterPenaltyWeight: configuration.jitterPenaltyWeight
         )
 
         let throughputScore = channelScore(
             mean: throughputChannel.mean,
             floor: configuration.throughputFloor,
             ceiling: configuration.throughputCeiling,
-            inverted: false
+            inverted: false,
+            dispersion: throughputDispersion,
+            jitterCeiling: configuration.throughputJitterCeiling,
+            jitterPenaltyWeight: configuration.jitterPenaltyWeight
         )
 
         let blendedLatency = latencyScore * weightedLatencyConfidence
         let blendedThroughput = throughputScore * weightedThroughputConfidence
 
         var score = (blendedLatency + blendedThroughput) / totalConfidence
+
+        score *= 1 - failureRatePenalty(
+            at: now,
+            configuration: configuration
+        )
 
         if pathState.isConstrained {
             score *= configuration.constrainedPenalty
@@ -296,10 +321,12 @@ private actor HealthEstimator {
         )
 
         return String(
-            format: "Latency – mean: %.3fs, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nConstrained: %@, Expensive: %@",
+            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nConstrained: %@, Expensive: %@",
             latencyMean,
+            latencyDispersion,
             latencyConfidence,
             throughputMean,
+            throughputDispersion,
             throughputConfidence,
             failureFraction,
             failureConfidence,
@@ -375,6 +402,13 @@ private actor HealthEstimator {
             halfLife: configuration.halfLife
         )
 
+        // A timeout is the failure signal.
+        failureChannel.record(
+            sample: 1,
+            at: .now,
+            halfLife: configuration.halfLife
+        )
+
         return computeHealth(
             isOnline: isOnline,
             pathState: pathState,
@@ -390,6 +424,12 @@ private actor HealthEstimator {
     ) -> NetworkHealth {
         latencyChannel.record(
             sample: seconds,
+            at: .now,
+            halfLife: configuration.halfLife
+        )
+
+        failureChannel.record(
+            sample: 0,
             at: .now,
             halfLife: configuration.halfLife
         )
@@ -439,7 +479,9 @@ private actor HealthEstimator {
 
     // MARK: - Auxiliary
 
-    /// Maps a channel mean to [0, 1] via a piecewise-linear ramp.
+    /// Maps a channel mean to [0, 1] via a piecewise-linear ramp,
+    /// then reduces the result in proportion to the channel's
+    /// normalized sample dispersion (jitter).
     ///
     /// When `inverted` is true (latency channel), lower values
     /// map to higher scores. When false (throughput channel),
@@ -448,12 +490,40 @@ private actor HealthEstimator {
         mean: Double,
         floor: Double,
         ceiling: Double,
-        inverted: Bool
+        inverted: Bool,
+        dispersion: Double,
+        jitterCeiling: Double,
+        jitterPenaltyWeight: Double
     ) -> Double {
         guard ceiling > floor else { return 0.5 }
 
         let normalized = (mean - floor) / (ceiling - floor)
         let clamped = min(max(normalized, 0), 1)
-        return inverted ? 1.0 - clamped : clamped
+        let rampScore = inverted ? 1.0 - clamped : clamped
+
+        let normalizedDispersion = min(dispersion / max(jitterCeiling, 0.001), 1)
+        let jitterPenalty = min(max(jitterPenaltyWeight * normalizedDispersion, 0), 1)
+
+        return rampScore * (1 - jitterPenalty)
+    }
+
+    /// Returns the failure-rate penalty in [0, 1] – the penalty
+    /// weight multiplied by the decayed failure fraction, scaled
+    /// by the failure channel's decayed weight so a single stale
+    /// failure cannot dominate the score.
+    private func failureRatePenalty(
+        at time: Date,
+        configuration: NetworkHealthConfiguration
+    ) -> Double {
+        let decayedWeight = failureChannel.decayedWeight(
+            at: time,
+            halfLife: configuration.halfLife
+        )
+
+        let penalty = configuration.failureRatePenaltyWeight *
+            failureChannel.mean *
+            min(decayedWeight, 1)
+
+        return min(max(penalty, 0), 1)
     }
 }

@@ -642,7 +642,7 @@ When you only need the current value – for example, to make a branching decisi
 
 #### Configuration
 
-Scoring parameters – including tier thresholds, channel weights, and the half-life of the exponentially weighted moving average – can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift):
+Scoring parameters – including tier thresholds, channel weights, penalty weights for failure rate and jitter, and the half-life of the exponentially weighted moving average – can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift):
 
 ```swift
 var configuration = NetworkHealthConfiguration()
@@ -655,6 +655,8 @@ The default configuration is suitable for most apps. Adjust individual parameter
 #### Instrumentation
 
 Health estimation is built into the default Firebase-backed database and storage implementations. Database operations contribute latency samples; storage uploads and downloads contribute throughput samples. Cache hits, coalesced operations, and offline failures are automatically excluded.
+
+Database operation timeouts also contribute failure evidence, which penalizes the score while recent. High dispersion in a channel's sample history (jitter) reduces that channel's contribution – an unstable connection scores lower than a steady one with the same averages.
 
 Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
 

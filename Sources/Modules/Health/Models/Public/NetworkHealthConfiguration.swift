@@ -50,6 +50,17 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `0.95`.
     public var expensivePenalty: Double
 
+    /// The weight of the multiplicative penalty applied to the
+    /// score as operations fail.
+    ///
+    /// The penalty is this weight multiplied by the decayed
+    /// fraction of failed operations, scaled by the failure
+    /// channel's confidence so a single stale failure cannot
+    /// dominate. A value of `0` disables the penalty.
+    ///
+    /// Default value is `0.5`.
+    public var failureRatePenaltyWeight: Double
+
     /// The score at or above which health is classified as
     /// ``NetworkHealthTier/fair``.
     ///
@@ -71,6 +82,16 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `30` seconds.
     public var halfLife: TimeInterval
 
+    /// The weight of the per-channel score reduction applied as
+    /// sample dispersion (jitter) grows.
+    ///
+    /// Each channel's score is reduced by up to this fraction
+    /// as its normalized dispersion approaches the channel's
+    /// jitter ceiling. A value of `0` disables the reduction.
+    ///
+    /// Default value is `0.3`.
+    public var jitterPenaltyWeight: Double
+
     /// The latency, in seconds, at or above which the latency
     /// channel maps to a score of approximately zero.
     ///
@@ -82,6 +103,15 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     ///
     /// Default value is `0.1` seconds.
     public var latencyFloor: TimeInterval
+
+    /// The latency channel's coefficient of variation at or
+    /// above which the jitter reduction saturates.
+    ///
+    /// A value of `1` saturates the reduction when the standard
+    /// deviation of latency samples equals their mean.
+    ///
+    /// Default value is `1.0`.
+    public var latencyJitterCeiling: Double
 
     /// The minimum aggregate channel confidence required to
     /// produce a ``NetworkHealth/measured(score:tier:)`` value.
@@ -113,6 +143,13 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `13.0` (approximately 8 KB/s).
     public var throughputFloor: Double
 
+    /// The throughput channel's standard deviation, in
+    /// log₂(bytes per second) units, at or above which the
+    /// jitter reduction saturates.
+    ///
+    /// Default value is `2.0` (a spread of two doublings).
+    public var throughputJitterCeiling: Double
+
     // MARK: - Init
 
     /// Creates a configuration with the specified parameters.
@@ -125,30 +162,38 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         channelWeightThroughput: Double = 0.4,
         constrainedPenalty: Double = 0.9,
         expensivePenalty: Double = 0.95,
+        failureRatePenaltyWeight: Double = 0.5,
         fairTierThreshold: Double = 0.3,
         goodTierThreshold: Double = 0.7,
         halfLife: TimeInterval = 30,
+        jitterPenaltyWeight: Double = 0.3,
         latencyCeiling: TimeInterval = 3,
         latencyFloor: TimeInterval = 0.1,
+        latencyJitterCeiling: Double = 1,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
         throughputCeiling: Double = 22,
-        throughputFloor: Double = 13
+        throughputFloor: Double = 13,
+        throughputJitterCeiling: Double = 2
     ) {
         self.adaptiveScoreThreshold = adaptiveScoreThreshold
         self.channelWeightLatency = channelWeightLatency
         self.channelWeightThroughput = channelWeightThroughput
         self.constrainedPenalty = constrainedPenalty
         self.expensivePenalty = expensivePenalty
+        self.failureRatePenaltyWeight = failureRatePenaltyWeight
         self.fairTierThreshold = fairTierThreshold
         self.goodTierThreshold = goodTierThreshold
         self.halfLife = halfLife
+        self.jitterPenaltyWeight = jitterPenaltyWeight
         self.latencyCeiling = latencyCeiling
         self.latencyFloor = latencyFloor
+        self.latencyJitterCeiling = latencyJitterCeiling
         self.minimumConfidence = minimumConfidence
         self.minimumThroughputSampleBytes = minimumThroughputSampleBytes
         self.throughputCeiling = throughputCeiling
         self.throughputFloor = throughputFloor
+        self.throughputJitterCeiling = throughputJitterCeiling
     }
 
     // MARK: - Methods
