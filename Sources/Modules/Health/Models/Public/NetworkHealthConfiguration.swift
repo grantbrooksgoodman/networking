@@ -108,6 +108,22 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `true`.
     public var isConnectionStabilityMonitoringEnabled: Bool
 
+    /// A Boolean value that determines whether URLSession
+    /// transaction metrics from the framework's own HTTPS
+    /// requests contribute health evidence.
+    ///
+    /// When enabled, a fresh connection's DNS-plus-connect
+    /// handshake contributes a latency sample, large responses
+    /// contribute throughput samples, and network-level request
+    /// failures contribute failure evidence. Total request
+    /// duration is never recorded – for requests whose
+    /// round-trip time is dominated by server-side work, it
+    /// would poison the estimate. Disable to feed the estimator
+    /// exclusively from Firebase traffic.
+    ///
+    /// Default value is `true`.
+    public var isURLSessionMetricsEnabled: Bool
+
     /// The weight of the per-channel score reduction applied as
     /// sample dispersion (jitter) grows.
     ///
@@ -227,6 +243,7 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         goodTierThreshold: Double = 0.7,
         halfLife: TimeInterval = 30,
         isConnectionStabilityMonitoringEnabled: Bool = true,
+        isURLSessionMetricsEnabled: Bool = true,
         jitterPenaltyWeight: Double = 0.3,
         latencyCeiling: TimeInterval = 3,
         latencyFloor: TimeInterval = 0.1,
@@ -252,6 +269,7 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         self.goodTierThreshold = goodTierThreshold
         self.halfLife = halfLife
         self.isConnectionStabilityMonitoringEnabled = isConnectionStabilityMonitoringEnabled
+        self.isURLSessionMetricsEnabled = isURLSessionMetricsEnabled
         self.jitterPenaltyWeight = jitterPenaltyWeight
         self.latencyCeiling = latencyCeiling
         self.latencyFloor = latencyFloor

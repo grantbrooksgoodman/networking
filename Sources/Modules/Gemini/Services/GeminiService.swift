@@ -62,8 +62,12 @@ struct GeminiService {
         let data: Data
         let urlResponse: URLResponse
         do {
-            (data, urlResponse) = try await urlSession.data(for: urlRequest)
+            (data, urlResponse) = try await urlSession.data(
+                for: urlRequest,
+                delegate: HealthTaskMetricsDelegate()
+            )
         } catch {
+            recordNetworkFailure(error)
             throw Exception(
                 error,
                 metadata: .init(sender: self)
@@ -223,6 +227,23 @@ struct GeminiService {
                 metadata: .init(sender: self)
             )
         }
+    }
+
+    private func recordNetworkFailure(_ error: any Error) {
+        guard Networking.config.networkHealthConfiguration.isURLSessionMetricsEnabled,
+              let urlError = error as? URLError else { return }
+
+        let networkFailureCodes: [URLError.Code] = [
+            .cannotConnectToHost,
+            .dnsLookupFailed,
+            .networkConnectionLost,
+            .timedOut,
+        ]
+
+        guard networkFailureCodes.contains(urlError.code) else { return }
+        Networking.config.healthDelegate.record(
+            .probeFailure(timeoutSeconds: urlSession.configuration.timeoutIntervalForRequest)
+        )
     }
 
     private func validateEnhancedOutput(
