@@ -88,9 +88,7 @@ public enum Networking {
     /// hard-coded ten-second default that appears across all
     /// ``DatabaseDelegate`` and ``StorageDelegate`` convenience
     /// overloads.
-    public static var defaultOperationTimeout: Duration {
-        .seconds(10)
-    }
+    public static let defaultOperationTimeout = Duration.seconds(10)
 
     private static let _didInitialize = LockIsolated(false)
 

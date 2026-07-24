@@ -20,10 +20,10 @@ import AppSubsystem
 /// This mirrors the `OperationCompletion` pattern
 /// (`@LockIsolated didComplete`) already used for continuation
 /// safety, applied independently to health sample recording.
-final class HealthSampleToken: @unchecked Sendable {
+struct HealthSampleToken {
     // MARK: - Properties
 
-    @LockIsolated private var didRecord = false
+    private let didRecord = LockIsolated(false)
 
     // MARK: - Methods
 
@@ -33,7 +33,7 @@ final class HealthSampleToken: @unchecked Sendable {
     ///   should record a sample); `false` if another caller
     ///   already claimed it.
     func claim() -> Bool {
-        $didRecord.withValue {
+        didRecord.projectedValue.withValue {
             guard !$0 else { return false }
             $0 = true
             return true

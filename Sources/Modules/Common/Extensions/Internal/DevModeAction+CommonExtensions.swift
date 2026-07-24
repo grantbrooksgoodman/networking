@@ -7,12 +7,100 @@
 
 /* Native */
 import Foundation
+import UIKit
 
 /* Proprietary */
 import AlertKit
 import AppSubsystem
 
 extension DevModeAction {
+    static var inspectNetworkHealthAction: DevModeAction {
+        @Sendable
+        func inspectNetworkHealth() {
+            Task { @MainActor in
+                @Dependency(\.networking.health) var networkHealthService: NetworkHealthDelegate
+                guard let summary = await (
+                    networkHealthService as? NetworkHealthService
+                )?.debugSummary() else {
+                    return Logger.log(
+                        .init(
+                            "The registered NetworkHealthDelegate is incompatible.",
+                            isReportable: false,
+                            metadata: .init(sender: self)
+                        ),
+                        domain: .Networking.health,
+                        with: .toast
+                    )
+                }
+
+                let inspectionAlert = AKAlert(
+                    title: "Network Health",
+                    message: summary,
+                    actions: [.init(
+                        "OK",
+                        style: .preferred,
+                        effect: {}
+                    )]
+                )
+
+                let fontSize: CGFloat = UIApplication.isFullyV26Compatible ? 15 : 13
+                let labelFont: UIFont = .systemFont(
+                    ofSize: fontSize,
+                    weight: .semibold
+                )
+
+                var secondaryAttributes: [AlertKit.AttributedStringConfig.StringAttributes] = [
+                    .init(
+                        [.font: labelFont],
+                        stringRanges: [
+                            "Confidence:",
+                            "Failures:",
+                            "Flaps:",
+                            "Last Probing:",
+                            "Latency:",
+                            "Path:",
+                            "Score:",
+                            "Socket:",
+                            "Stalls:",
+                            "Throughput:",
+                            "Transfer:",
+                        ]
+                    ),
+                ]
+
+                if let tier = networkHealthService.health.tier {
+                    let tierColor: UIColor = switch tier {
+                    case .fair: .systemOrange
+                    case .good: .systemGreen
+                    case .poor: .systemRed
+                    }
+
+                    secondaryAttributes.append(.init(
+                        [
+                            .font: labelFont,
+                            .foregroundColor: tierColor,
+                        ],
+                        stringRanges: ["(\(tier.rawValue.capitalized))"]
+                    ))
+                }
+
+                inspectionAlert.setMessageAttributes(
+                    .init(
+                        [.font: UIFont.systemFont(ofSize: fontSize)],
+                        secondaryAttributes: secondaryAttributes
+                    )
+                )
+
+                await inspectionAlert.present(translating: [])
+            }
+        }
+
+        return .init(
+            title: "Inspect Network Health",
+            perform: inspectNetworkHealth
+        )
+    }
+
     static var switchEnvironmentAction: DevModeAction {
         @Sendable
         func switchEnvironment() {

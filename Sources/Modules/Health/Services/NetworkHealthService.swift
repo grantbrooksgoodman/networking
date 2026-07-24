@@ -15,9 +15,7 @@ import Network
 /* Proprietary */
 import AppSubsystem
 
-// MARK: - NetworkHealthService
-
-final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
+struct NetworkHealthService: NetworkHealthDelegate {
     // MARK: - Dependencies
 
     @Dependency(\.build.isOnline) private var isOnline: Bool
@@ -25,16 +23,16 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     // MARK: - Properties
 
-    nonisolated static let shared = NetworkHealthService()
+    static let shared = NetworkHealthService()
 
+    private let connectionStabilityObserver = LockIsolated<ConnectionStabilityObserver?>(nil)
     private let estimator = HealthEstimator()
-    private let monitorQueue = DispatchQueue(label: "com.neotechnica.networking.health")
-    private let _connectionStabilityObserver = LockIsolated<ConnectionStabilityObserver?>(nil)
+    private let monitorQueue = DispatchQueue(label: "us.neotechnica.networking.health")
+    private let pathMonitor = LockIsolated<NWPathMonitor?>(nil)
+    private let pathState = LockIsolated<PathState>(.init())
+    private let prober = LockIsolated<NetworkHealthProber?>(nil)
+    private let radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
     private let _health = LockIsolated<NetworkHealth>(.unknown)
-    private let _pathMonitor = LockIsolated<NWPathMonitor?>(nil)
-    private let _pathState = LockIsolated<PathState>(.init())
-    private let _prober = LockIsolated<NetworkHealthProber?>(nil)
-    private let _radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
 
     // MARK: - Computed Properties
 
@@ -55,13 +53,13 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         .init(
             configuration: Networking.config.networkHealthConfiguration,
             isOnline: isOnline,
-            pathState: _pathState.wrappedValue
+            pathState: pathState.wrappedValue
         )
     }
 
     // MARK: - Init
 
-    private nonisolated init() {}
+    private init() {}
 
     // MARK: - NetworkHealthDelegate Conformance
 
@@ -110,24 +108,26 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     func startMonitoring() {
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { [weak self] path in
-            self?.handlePathUpdate(path)
+        monitor.pathUpdateHandler = { path in
+            handlePathUpdate(path)
         }
 
         monitor.start(queue: monitorQueue)
-        _pathMonitor.wrappedValue = monitor
+        pathMonitor.wrappedValue = monitor
         registerRadioTechnologyObserver()
     }
 
     func stopMonitoring() {
-        _pathMonitor.wrappedValue?.cancel()
-        _pathMonitor.wrappedValue = nil
+        pathMonitor.wrappedValue?.cancel()
+        pathMonitor.wrappedValue = nil
 
-        let connectionStabilityObserver = _connectionStabilityObserver.projectedValue.withValue { observer -> ConnectionStabilityObserver? in
-            let current = observer
-            observer = nil
-            return current
-        }
+        let connectionStabilityObserver = connectionStabilityObserver
+            .projectedValue
+            .withValue { observer -> ConnectionStabilityObserver? in
+                let current = observer
+                observer = nil
+                return current
+            }
 
         connectionStabilityObserver?.stop()
         removeRadioTechnologyObserver()
@@ -137,40 +137,114 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     func debugSummary() async -> String {
         let configuration = Networking.config.networkHealthConfiguration
-        let summary = await estimator.debugSummary(context: estimatorContext)
+        let statistics = await estimator.statistics(context: estimatorContext)
 
-        let scoreDescription = health.score.map { String(format: "%.2f", $0) } ?? "unknown"
-        let tierDescription = health.tier?.rawValue ?? "unknown"
+        let health = health
+        let scoreDescription = if let score = health.score,
+                                  let tier = health.tier {
+            String(format: "%.2f", score) + " (\(tier.rawValue.capitalized))"
+        } else {
+            "unknown"
+        }
+
+        let latencyDescription = statistics.latencyConfidence > 0
+            ? "\(formattedSeconds(statistics.latencyMean)) ±\(Int(statistics.latencyDispersion * 100))%"
+            : "none"
+
+        let throughputDescription = statistics.throughputConfidence > 0
+            ? "\(formattedBytesPerSecond(pow(2, statistics.throughputMean))) ±\(String(format: "%.2f", statistics.throughputDispersion))"
+            : "none"
+
+        let confidenceDescription = String(
+            format: "%.1f · %.1f",
+            statistics.latencyConfidence,
+            statistics.throughputConfidence
+        )
+
+        let pathState = pathState.wrappedValue
+        var pathComponents = [interfaceDescription(pathState.interfaceType)]
+        if pathState.isConstrained { pathComponents.append("constrained") }
+        if pathState.isExpensive { pathComponents.append("expensive") }
+
+        if pathState.interfaceType == .cellular {
+            pathComponents.append(pathState.radioTechnology.rawValue)
+        }
 
         let socketDescription: String
-        if let connectionStabilityObserver = _connectionStabilityObserver.wrappedValue {
-            let reconnectDescription = connectionStabilityObserver.lastReconnectDuration.map {
-                String(format: "%.1fs", $0)
-            } ?? "none"
+        if let connectionStabilityObserver = connectionStabilityObserver.wrappedValue {
+            let reconnectSuffix = connectionStabilityObserver.lastReconnectDuration.map {
+                " · reconnect \(String(format: "%.1f", $0))s"
+            } ?? ""
 
-            socketDescription = "Socket – connected: \(connectionStabilityObserver.connectedStateDescription), last reconnect: \(reconnectDescription)"
+            socketDescription = connectionStabilityObserver.connectedStateDescription + reconnectSuffix
         } else {
-            socketDescription = "Socket – unattached"
+            socketDescription = "unattached"
         }
 
         let probeDescription = if configuration.probeConfiguration == nil {
-            "Probing: disabled"
-        } else if let prober = _prober.wrappedValue {
-            "Probing: \(prober.statsDescription)"
+            "disabled"
+        } else if let prober = prober.wrappedValue {
+            prober.statsDescription
         } else {
-            "Probing: enabled, no attempts"
+            "enabled, no attempts"
         }
+
+        let transferDescription = statistics.lastTransferBytesPerSecond.map {
+            formattedBytesPerSecond($0)
+        } ?? "none"
 
         return """
         Score: \(scoreDescription)
-        Tier: \(tierDescription)
-        \(summary)
-        \(socketDescription)
-        \(probeDescription)
+
+        Latency: \(latencyDescription)
+        Throughput: \(throughputDescription)
+        Confidence: \(confidenceDescription)
+
+        Failures: \(Int(statistics.failureFraction * 100))% · Flaps: \(String(format: "%.1f", statistics.flapCount)) · Stalls: \(statistics.stallCount)
+
+        Path: \(pathComponents.joined(separator: " · "))
+        Socket: \(socketDescription)
+        Transfer: \(transferDescription)
+
+        Last Probing: \(probeDescription)
         """
     }
 
     // MARK: - Auxiliary
+
+    private func createProberIfNeeded() -> NetworkHealthProber {
+        prober
+            .projectedValue
+            .withValue { prober in
+                if let prober { return prober }
+                let created = NetworkHealthProber(
+                    onEvent: { record($0) },
+                    onLatencySample: { submitLatencySample(seconds: $0) },
+                    pathStateProvider: { pathState.wrappedValue }
+                )
+
+                prober = created
+                return created
+            }
+    }
+
+    private func formattedBytesPerSecond(_ bytesPerSecond: Double) -> String {
+        if bytesPerSecond >= 1_048_576 {
+            return String(format: "%.1f MB/s", bytesPerSecond / 1_048_576)
+        }
+
+        if bytesPerSecond >= 1024 {
+            return String(format: "%.1f KB/s", bytesPerSecond / 1024)
+        }
+
+        return String(format: "%.0f B/s", bytesPerSecond)
+    }
+
+    private func formattedSeconds(_ seconds: TimeInterval) -> String {
+        seconds < 1
+            ? "\(Int(seconds * 1000)) ms"
+            : String(format: "%.2f s", seconds)
+    }
 
     private func handlePathUpdate(_ path: NWPath) {
         let newState = PathState(
@@ -180,16 +254,14 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             radioTechnology: RadioTechnology.current
         )
 
-        let previousInterfaceType = _pathState.wrappedValue.interfaceType
-        _pathState.wrappedValue = newState
+        let previousInterfaceType = pathState.wrappedValue.interfaceType
+        pathState.wrappedValue = newState
 
         // Reset channel confidence on interface transitions
         // (e.g. Wi-Fi → cellular). Previous samples are not
         // representative of the new path.
         guard previousInterfaceType != nil,
-              previousInterfaceType != newState.interfaceType else {
-            return
-        }
+              previousInterfaceType != newState.interfaceType else { return }
 
         updateHealth { estimator, context in
             await estimator.resetConfidence()
@@ -203,16 +275,28 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     private func handleRadioTechnologyChange() {
         let radioTechnology = RadioTechnology.current
-        let didChange: Bool = _pathState.projectedValue.withValue { pathState in
-            guard pathState.radioTechnology != radioTechnology else { return false }
-            pathState.radioTechnology = radioTechnology
-            return true
-        }
+        let didChange: Bool = pathState
+            .projectedValue
+            .withValue { pathState in
+                guard pathState.radioTechnology != radioTechnology else { return false }
+                pathState.radioTechnology = radioTechnology
+                return true
+            }
 
         guard didChange else { return }
-
         updateHealth { estimator, context in
             await estimator.computeHealth(context: context)
+        }
+    }
+
+    private func interfaceDescription(_ interfaceType: NWInterface.InterfaceType?) -> String {
+        switch interfaceType {
+        case .cellular?: "Cellular"
+        case .loopback?: "Loopback"
+        case .other?: "Other"
+        case .wifi?: "Wi-Fi"
+        case .wiredEthernet?: "Ethernet"
+        default: "unknown"
         }
     }
 
@@ -221,7 +305,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     /// identical to baseline.
     private func maybeProbe(afterDelay delay: Duration? = nil) {
         guard Networking.config.networkHealthConfiguration.probeConfiguration != nil else { return }
-        let prober = proberCreatingIfNeeded()
+        let prober = createProberIfNeeded()
         Task {
             if let delay {
                 try? await Task.sleep(for: delay)
@@ -231,34 +315,12 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         }
     }
 
-    private func proberCreatingIfNeeded() -> NetworkHealthProber {
-        _prober.projectedValue.withValue { prober in
-            if let prober { return prober }
-
-            let created = NetworkHealthProber(
-                onEvent: { [weak self] event in
-                    self?.record(event)
-                },
-                onLatencySample: { [weak self] seconds in
-                    self?.submitLatencySample(seconds: seconds)
-                },
-                pathStateProvider: { [weak self] in
-                    self?._pathState.wrappedValue ?? .init()
-                }
-            )
-
-            prober = created
-            return created
-        }
-    }
-
     private func publish(_ health: NetworkHealth) {
         let previousTier = _health.wrappedValue.tier
         _health.wrappedValue = health
         Observables.networkHealth.value = health
 
         guard previousTier != health.tier else { return }
-
         Logger.log(
             "Network health transitioned from \(previousTier?.rawValue ?? "unknown") to \(health.tier?.rawValue ?? "unknown").",
             domain: .Networking.health,
@@ -272,21 +334,21 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             forName: .CTServiceRadioAccessTechnologyDidChange,
             object: nil,
             queue: nil
-        ) { [weak self] _ in
-            self?.handleRadioTechnologyChange()
-        }
+        ) { _ in handleRadioTechnologyChange() }
 
-        _radioTechnologyObserver.wrappedValue = observer
+        radioTechnologyObserver.wrappedValue = observer
         #endif
     }
 
     private func removeRadioTechnologyObserver() {
         #if canImport(CoreTelephony) && !os(macOS)
-        let observer = _radioTechnologyObserver.projectedValue.withValue { observer -> (any NSObjectProtocol)? in
-            let current = observer
-            observer = nil
-            return current
-        }
+        let observer = radioTechnologyObserver
+            .projectedValue
+            .withValue { observer -> (any NSObjectProtocol)? in
+                let current = observer
+                observer = nil
+                return current
+            }
 
         guard let observer else { return }
         notificationCenter.removeObserver(observer)
@@ -298,18 +360,19 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     /// uses the realtime database. An observer attached eagerly
     /// would itself keep the realtime connection alive.
     private func startConnectionStabilityMonitoringIfNeeded() {
-        guard Networking.config.networkHealthConfiguration.isConnectionStabilityMonitoringEnabled else { return }
+        guard Networking
+            .config
+            .networkHealthConfiguration
+            .isConnectionStabilityMonitoringEnabled else { return }
 
-        let connectionStabilityObserver = _connectionStabilityObserver.projectedValue.withValue { observer -> ConnectionStabilityObserver? in
-            guard observer == nil else { return nil }
-
-            let created = ConnectionStabilityObserver { [weak self] event in
-                self?.record(event)
+        let connectionStabilityObserver = connectionStabilityObserver
+            .projectedValue
+            .withValue { observer -> ConnectionStabilityObserver? in
+                guard observer == nil else { return nil }
+                let created = ConnectionStabilityObserver { record($0) }
+                observer = created
+                return created
             }
-
-            observer = created
-            return created
-        }
 
         connectionStabilityObserver?.start()
     }
@@ -340,7 +403,32 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     }
 }
 
-// MARK: - HealthEstimator
+/// A point-in-time snapshot of the estimator's inputs,
+/// captured when an update executes.
+private struct EstimatorContext {
+    // MARK: - Properties
+
+    let configuration: NetworkHealthConfiguration
+    let isOnline: Bool
+    let pathState: PathState
+}
+
+/// A point-in-time snapshot of the estimator's channel state,
+/// used to build the Dev Mode inspection summary.
+private struct EstimatorStatistics {
+    // MARK: - Properties
+
+    let failureFraction: Double
+    let flapCount: Double
+    let lastTransferBytesPerSecond: Double?
+    let latencyConfidence: Double
+    let latencyDispersion: Double
+    let latencyMean: Double
+    let stallCount: Int
+    let throughputConfidence: Double
+    let throughputDispersion: Double
+    let throughputMean: Double
+}
 
 private actor HealthEstimator {
     // MARK: - Properties
@@ -466,57 +554,6 @@ private actor HealthEstimator {
         )
     }
 
-    func debugSummary(context: EstimatorContext) -> String {
-        let halfLife = context.configuration.halfLife
-        let now = Date.now
-        let pathState = context.pathState
-
-        let latencyMean = latencyChannel.mean
-        let latencyConfidence = latencyChannel.decayedWeight(
-            at: now,
-            halfLife: halfLife
-        )
-
-        let throughputMean = throughputChannel.mean
-        let throughputConfidence = throughputChannel.decayedWeight(
-            at: now,
-            halfLife: halfLife
-        )
-
-        let failureFraction = failureChannel.mean
-        let failureConfidence = failureChannel.decayedWeight(
-            at: now,
-            halfLife: halfLife
-        )
-
-        let decayedFlapCount = flapChannel.decayedWeight(
-            at: now,
-            halfLife: halfLife
-        )
-
-        let lastTransferDescription = lastTransferBytesPerSecond.map {
-            String(format: "%.1f KB/s", $0 / 1024)
-        } ?? "none"
-
-        return String(
-            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nLast transfer: %@, Stalls: %d\nConstrained: %@, Expensive: %@, Radio: %@",
-            latencyMean,
-            latencyDispersion,
-            latencyConfidence,
-            throughputMean,
-            throughputDispersion,
-            throughputConfidence,
-            failureFraction,
-            failureConfidence,
-            decayedFlapCount,
-            lastTransferDescription,
-            stallCount,
-            pathState.isConstrained.description,
-            pathState.isExpensive.description,
-            pathState.radioTechnology.rawValue
-        )
-    }
-
     func record(
         event: NetworkHealthEvent,
         context: EstimatorContext
@@ -621,6 +658,33 @@ private actor HealthEstimator {
         throughputChannel.reset()
     }
 
+    func statistics(context: EstimatorContext) -> EstimatorStatistics {
+        let halfLife = context.configuration.halfLife
+        let now = Date.now
+
+        return .init(
+            failureFraction: failureChannel.mean,
+            flapCount: flapChannel.decayedWeight(
+                at: now,
+                halfLife: halfLife
+            ),
+            lastTransferBytesPerSecond: lastTransferBytesPerSecond,
+            latencyConfidence: latencyChannel.decayedWeight(
+                at: now,
+                halfLife: halfLife
+            ),
+            latencyDispersion: latencyDispersion,
+            latencyMean: latencyChannel.mean,
+            stallCount: stallCount,
+            throughputConfidence: throughputChannel.decayedWeight(
+                at: now,
+                halfLife: halfLife
+            ),
+            throughputDispersion: throughputDispersion,
+            throughputMean: throughputChannel.mean
+        )
+    }
+
     // MARK: - Auxiliary
 
     /// Maps a channel mean to [0, 1] via a piecewise-linear ramp,
@@ -688,16 +752,4 @@ private actor HealthEstimator {
 
         return min(max(penalty, 0), 1)
     }
-}
-
-// MARK: - EstimatorContext
-
-/// A point-in-time snapshot of the estimator's inputs,
-/// captured when an update executes.
-private struct EstimatorContext {
-    // MARK: - Properties
-
-    let configuration: NetworkHealthConfiguration
-    let isOnline: Bool
-    let pathState: PathState
 }

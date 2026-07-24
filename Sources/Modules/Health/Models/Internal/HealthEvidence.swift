@@ -58,10 +58,8 @@ enum HealthEvidence {
             error: error,
             elapsed: elapsed
         ) {
-        case let .latency(seconds):
-            delegate.recordLatencySample(seconds: seconds)
-        case .noEvidence:
-            break
+        case let .latency(seconds): delegate.recordLatencySample(seconds: seconds)
+        case .noEvidence: break
         }
     }
 

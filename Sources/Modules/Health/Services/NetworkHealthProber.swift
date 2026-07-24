@@ -31,7 +31,7 @@ import AppSubsystem
 /// ``NetworkHealthEvent/probeFailure(timeoutSeconds:)``. Any
 /// other outcome – including unexpected status codes – means
 /// the server answered, and counts as latency evidence.
-final class NetworkHealthProber: @unchecked Sendable {
+struct NetworkHealthProber {
     // MARK: - Types
 
     private struct MutableState {
@@ -53,8 +53,7 @@ final class NetworkHealthProber: @unchecked Sendable {
     private let onEvent: @Sendable (NetworkHealthEvent) -> Void
     private let onLatencySample: @Sendable (TimeInterval) -> Void
     private let pathStateProvider: @Sendable () -> PathState
-
-    @LockIsolated private var state = MutableState()
+    private let state = LockIsolated(MutableState())
 
     // MARK: - Computed Properties
 
@@ -64,17 +63,17 @@ final class NetworkHealthProber: @unchecked Sendable {
         let maximumProbesPerHour = Networking.config.networkHealthConfiguration.probeConfiguration?.maximumProbesPerHour ?? 0
         let now = Date.now
 
-        return $state.withValue { state in
+        return state.projectedValue.withValue { state in
             state.probeAttempts.removeAll { now.timeIntervalSince($0) >= Self.budgetWindowSeconds }
             let remainingBudget = max(maximumProbesPerHour - state.probeAttempts.count, 0)
 
             guard let lastAttemptAt = state.lastAttemptAt else {
-                return "no attempts, budget: \(remainingBudget)/\(maximumProbesPerHour)"
+                return "never · budget \(remainingBudget)/\(maximumProbesPerHour)"
             }
 
             let secondsAgo = Int(now.timeIntervalSince(lastAttemptAt))
             let outcomeDescription = state.lastOutcomeDescription ?? "in flight"
-            return "last: \(secondsAgo)s ago (\(outcomeDescription)), budget: \(remainingBudget)/\(maximumProbesPerHour)"
+            return "\(secondsAgo)s ago (\(outcomeDescription)) · budget \(remainingBudget)/\(maximumProbesPerHour)"
         }
     }
 
@@ -95,9 +94,11 @@ final class NetworkHealthProber: @unchecked Sendable {
     /// Sends a single probe if – and only if – every gate in
     /// the guard chain passes. Bails silently otherwise.
     func maybeProbe() async {
-        guard let probeConfiguration = Networking.config.networkHealthConfiguration.probeConfiguration else { return }
-
-        guard isOnline else { return }
+        guard let probeConfiguration = Networking
+            .config
+            .networkHealthConfiguration
+            .probeConfiguration,
+            isOnline else { return }
 
         #if canImport(UIKit)
         let isBackgrounded = await MainActor.run {
@@ -109,19 +110,16 @@ final class NetworkHealthProber: @unchecked Sendable {
 
         let pathState = pathStateProvider()
 
-        guard !pathState.isConstrained || probeConfiguration.allowsConstrainedPaths else { return }
-        guard !pathState.isExpensive || probeConfiguration.allowsExpensivePaths else { return }
-
-        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        guard !pathState.isConstrained || probeConfiguration.allowsConstrainedPaths,
+              !pathState.isExpensive || probeConfiguration.allowsExpensivePaths,
+              !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
 
         let now = Date.now
-        let didClaimProbe: Bool = $state.withValue { state in
+        let didClaimProbe: Bool = state.projectedValue.withValue { state in
             state.probeAttempts.removeAll { now.timeIntervalSince($0) >= Self.budgetWindowSeconds }
 
             guard !state.isProbeInFlight,
-                  state.probeAttempts.count < probeConfiguration.maximumProbesPerHour else {
-                return false
-            }
+                  state.probeAttempts.count < probeConfiguration.maximumProbesPerHour else { return false }
 
             if let lastAttemptAt = state.lastAttemptAt,
                now.timeIntervalSince(lastAttemptAt) < probeConfiguration.minimumIntervalSeconds {
@@ -135,7 +133,6 @@ final class NetworkHealthProber: @unchecked Sendable {
         }
 
         guard didClaimProbe else { return }
-
         await performProbe(with: probeConfiguration)
     }
 
@@ -188,7 +185,7 @@ final class NetworkHealthProber: @unchecked Sendable {
             }
         }
 
-        $state.withValue { state in
+        state.projectedValue.withValue { state in
             state.isProbeInFlight = false
             state.lastOutcomeDescription = outcomeDescription
         }

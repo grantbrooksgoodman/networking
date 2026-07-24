@@ -10,7 +10,7 @@ let package = Package(
     name: "Networking",
     platforms: [
         .iOS(.v18),
-        .macOS(.v13),
+        .macOS(.v15),
     ],
     products: [
         .library(

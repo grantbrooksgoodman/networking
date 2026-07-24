@@ -31,10 +31,12 @@ import AppSubsystem
 /// whole-transfer sample when no segment was ever emitted – or
 /// ``invalidate()`` on failure. Either call cancels the
 /// watchdog and renders the probe inert.
-final class TransferProgressProbe: @unchecked Sendable {
+struct TransferProgressProbe {
     // MARK: - Types
 
     private struct MutableState {
+        /* MARK: Properties */
+
         var didEmitSegment = false
         var didReportStall = false
         var isFinished = false
@@ -45,6 +47,8 @@ final class TransferProgressProbe: @unchecked Sendable {
         var startedAt: Date
         var watchdogTask: Task<Void, Never>?
 
+        /* MARK: Init */
+
         init(startedAt: Date = .now) {
             lastProgressAt = startedAt
             segmentStartedAt = startedAt
@@ -54,17 +58,13 @@ final class TransferProgressProbe: @unchecked Sendable {
 
     // MARK: - Properties
 
-    @LockIsolated private var state = MutableState()
+    private let state = LockIsolated(MutableState())
 
-    // MARK: - Object Lifecycle
+    // MARK: - Init
 
     init() {
         let watchdogTask = makeWatchdogTask()
-        $state.withValue { $0.watchdogTask = watchdogTask }
-    }
-
-    deinit {
-        invalidate()
+        state.projectedValue.withValue { $0.watchdogTask = watchdogTask }
     }
 
     // MARK: - Methods
@@ -83,7 +83,7 @@ final class TransferProgressProbe: @unchecked Sendable {
     func finish(totalBytes: Int?) {
         let now = Date.now
 
-        let (watchdogTask, sample) = $state.withValue { state -> (Task<Void, Never>?, (bytes: Int, seconds: TimeInterval)?) in
+        let (watchdogTask, sample) = state.projectedValue.withValue { state -> (Task<Void, Never>?, (bytes: Int, seconds: TimeInterval)?) in
             guard !state.isFinished else { return (nil, nil) }
             state.isFinished = true
 
@@ -124,7 +124,7 @@ final class TransferProgressProbe: @unchecked Sendable {
         let minimumThroughputSampleBytes = Networking.config.networkHealthConfiguration.minimumThroughputSampleBytes
         let now = Date.now
 
-        let sample: (bytes: Int, seconds: TimeInterval)? = $state.withValue { state in
+        let sample: (bytes: Int, seconds: TimeInterval)? = state.projectedValue.withValue { state in
             guard !state.isFinished else { return nil }
 
             let deltaBytes = progress.completedBytes - state.lastCompletedBytes
@@ -148,7 +148,6 @@ final class TransferProgressProbe: @unchecked Sendable {
         }
 
         guard let sample else { return }
-
         Networking.config.healthDelegate.recordThroughputSample(
             bytes: sample.bytes,
             seconds: sample.seconds
@@ -158,7 +157,7 @@ final class TransferProgressProbe: @unchecked Sendable {
     /// Marks the transfer as failed or abandoned, cancelling
     /// the watchdog without recording a completion sample.
     func invalidate() {
-        let watchdogTask = $state.withValue { state -> Task<Void, Never>? in
+        let watchdogTask = state.projectedValue.withValue { state -> Task<Void, Never>? in
             guard !state.isFinished else { return nil }
             state.isFinished = true
 
@@ -173,16 +172,15 @@ final class TransferProgressProbe: @unchecked Sendable {
     // MARK: - Auxiliary
 
     private func makeWatchdogTask() -> Task<Void, Never> {
-        Task { [weak self] in
+        Task {
             while !Task.isCancelled {
                 let checkInterval = Networking.config.networkHealthConfiguration.transferStallCheckInterval
                 try? await Task.sleep(for: .seconds(checkInterval))
 
-                guard let self,
-                      !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
 
                 let transferStallSeconds = Networking.config.networkHealthConfiguration.transferStallSeconds
-                let shouldReportStall = $state.withValue { state in
+                let shouldReportStall = state.projectedValue.withValue { state in
                     guard !state.isFinished,
                           !state.didReportStall,
                           Date.now.timeIntervalSince(state.lastProgressAt) >= transferStallSeconds else {
@@ -194,7 +192,6 @@ final class TransferProgressProbe: @unchecked Sendable {
                 }
 
                 guard shouldReportStall else { continue }
-
                 Networking.config.healthDelegate.record(.transferStall)
                 return
             }
