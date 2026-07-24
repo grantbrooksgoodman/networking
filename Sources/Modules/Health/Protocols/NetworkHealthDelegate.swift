@@ -47,6 +47,21 @@ public protocol NetworkHealthDelegate: Sendable {
 
     // MARK: - Methods
 
+    /// Records a discrete network health event.
+    ///
+    /// Events carry one-shot evidence – connection flaps,
+    /// handshake timings, transfer stalls, and probe
+    /// failures – that complements the continuous latency
+    /// and throughput sample channels. See
+    /// ``NetworkHealthEvent`` for the available signals.
+    ///
+    /// A default implementation that does nothing is
+    /// provided, so custom conformances only implement this
+    /// method to incorporate event evidence.
+    ///
+    /// - Parameter event: The event to record.
+    func record(_ event: NetworkHealthEvent)
+
     /// Records a censored latency sample at the given duration.
     ///
     /// A censored sample indicates that the true latency is
@@ -87,4 +102,11 @@ public protocol NetworkHealthDelegate: Sendable {
 
     /// Stops monitoring and releases the underlying path monitor.
     func stopMonitoring()
+}
+
+public extension NetworkHealthDelegate {
+    /// Records a discrete network health event.
+    ///
+    /// This default implementation does nothing.
+    func record(_: NetworkHealthEvent) {}
 }

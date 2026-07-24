@@ -41,6 +41,27 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     // MARK: - NetworkHealthDelegate Conformance
 
+    func record(_ event: NetworkHealthEvent) {
+        if case let .connectionRestored(afterSeconds) = event {
+            Logger.log(
+                "Connection restored after \(String(format: "%.1f", afterSeconds)) seconds.",
+                domain: .Networking.health,
+                sender: self
+            )
+        }
+
+        Task {
+            let updated = await estimator.record(
+                event: event,
+                isOnline: isOnline,
+                pathState: _pathState.wrappedValue,
+                configuration: Networking.config.networkHealthConfiguration
+            )
+
+            publish(updated)
+        }
+    }
+
     func recordCensoredLatencySample(seconds: TimeInterval) {
         Task {
             let updated = await estimator.recordCensoredLatency(
@@ -171,6 +192,8 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 private actor HealthEstimator {
     // MARK: - Properties
 
+    private var failureChannel = HealthChannel()
+    private var flapChannel = HealthChannel()
     private var latencyChannel = HealthChannel()
     private var throughputChannel = HealthChannel()
 
@@ -261,14 +284,82 @@ private actor HealthEstimator {
             halfLife: halfLife
         )
 
+        let failureFraction = failureChannel.mean
+        let failureConfidence = failureChannel.decayedWeight(
+            at: now,
+            halfLife: halfLife
+        )
+
+        let decayedFlapCount = flapChannel.decayedWeight(
+            at: now,
+            halfLife: halfLife
+        )
+
         return String(
-            format: "Latency – mean: %.3fs, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), confidence: %.2f\nConstrained: %@, Expensive: %@",
+            format: "Latency – mean: %.3fs, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nConstrained: %@, Expensive: %@",
             latencyMean,
             latencyConfidence,
             throughputMean,
             throughputConfidence,
+            failureFraction,
+            failureConfidence,
+            decayedFlapCount,
             pathState.isConstrained.description,
             pathState.isExpensive.description
+        )
+    }
+
+    func record(
+        event: NetworkHealthEvent,
+        isOnline: Bool,
+        pathState: PathState,
+        configuration: NetworkHealthConfiguration
+    ) -> NetworkHealth {
+        switch event {
+        case .connectionFlap:
+            flapChannel.record(
+                sample: 1,
+                at: .now,
+                halfLife: configuration.halfLife
+            )
+
+        case .connectionRestored:
+            // Informational only – reconnect timing reflects
+            // backoff scheduling, not network quality.
+            break
+
+        case let .handshake(seconds):
+            latencyChannel.record(
+                sample: seconds,
+                at: .now,
+                halfLife: configuration.halfLife
+            )
+
+        case let .probeFailure(timeoutSeconds):
+            failureChannel.record(
+                sample: 1,
+                at: .now,
+                halfLife: configuration.halfLife
+            )
+
+            latencyChannel.record(
+                sample: timeoutSeconds,
+                at: .now,
+                halfLife: configuration.halfLife
+            )
+
+        case .transferStall:
+            failureChannel.record(
+                sample: 1,
+                at: .now,
+                halfLife: configuration.halfLife
+            )
+        }
+
+        return computeHealth(
+            isOnline: isOnline,
+            pathState: pathState,
+            configuration: configuration
         )
     }
 
@@ -340,6 +431,8 @@ private actor HealthEstimator {
     }
 
     func resetConfidence() {
+        failureChannel.reset()
+        flapChannel.reset()
         latencyChannel.reset()
         throughputChannel.reset()
     }

@@ -656,6 +656,8 @@ The default configuration is suitable for most apps. Adjust individual parameter
 
 Health estimation is built into the default Firebase-backed database and storage implementations. Database operations contribute latency samples; storage uploads and downloads contribute throughput samples. Cache hits, coalesced operations, and offline failures are automatically excluded.
 
+Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
+
 > **Note:** Only the built-in Firebase implementations are instrumented. Custom delegates registered through `Networking.config` are not observed by the health system.
 
 ### Storage
