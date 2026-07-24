@@ -656,6 +656,8 @@ The default configuration is suitable for most apps. Adjust individual parameter
 
 Health estimation is built into the default Firebase-backed database and storage implementations. Database operations contribute latency samples; storage uploads and downloads contribute throughput samples. Cache hits, coalesced operations, and offline failures are automatically excluded.
 
+Large storage transfers are sampled continuously while in flight – each segment of transferred bytes that reaches the minimum sample size contributes its own throughput sample, so the estimate learns about a long transfer as it happens rather than only at completion. A transfer whose progress freezes for `transferStallSeconds` contributes failure evidence (a stall) before its timeout fires.
+
 Database operation timeouts also contribute failure evidence, which penalizes the score while recent. High dispersion in a channel's sample history (jitter) reduces that channel's contribution – an unstable connection scores lower than a steady one with the same averages.
 
 When the app uses the realtime database, the health system additionally monitors the realtime client's own connection state. Unexpected socket drops in the foreground (flaps) penalize the score while recent; drops that coincide with going offline, backgrounding, or the grace period after foregrounding are ignored. Because an attached observer keeps the realtime connection alive, the observer attaches lazily – only after the first database operation produces a latency sample – so apps that use only storage or authentication never open a realtime connection. Set `isConnectionStabilityMonitoringEnabled` to `false` to disable this signal entirely.

@@ -240,7 +240,9 @@ private actor HealthEstimator {
 
     private var failureChannel = HealthChannel()
     private var flapChannel = HealthChannel()
+    private var lastTransferBytesPerSecond: Double?
     private var latencyChannel = HealthChannel()
+    private var stallCount = 0
     private var throughputChannel = HealthChannel()
 
     // MARK: - Computed Properties
@@ -371,8 +373,12 @@ private actor HealthEstimator {
             halfLife: halfLife
         )
 
+        let lastTransferDescription = lastTransferBytesPerSecond.map {
+            String(format: "%.1f KB/s", $0 / 1024)
+        } ?? "none"
+
         return String(
-            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nConstrained: %@, Expensive: %@",
+            format: "Latency – mean: %.3fs, dispersion: %.2f, confidence: %.2f\nThroughput – mean: %.1f (log₂ B/s), dispersion: %.2f, confidence: %.2f\nFailure – fraction: %.2f, confidence: %.2f\nFlaps – decayed count: %.2f\nLast transfer: %@, Stalls: %d\nConstrained: %@, Expensive: %@",
             latencyMean,
             latencyDispersion,
             latencyConfidence,
@@ -382,6 +388,8 @@ private actor HealthEstimator {
             failureFraction,
             failureConfidence,
             decayedFlapCount,
+            lastTransferDescription,
+            stallCount,
             pathState.isConstrained.description,
             pathState.isExpensive.description
         )
@@ -427,6 +435,8 @@ private actor HealthEstimator {
             )
 
         case .transferStall:
+            stallCount += 1
+
             failureChannel.record(
                 sample: 1,
                 at: .now,
@@ -508,6 +518,8 @@ private actor HealthEstimator {
         }
 
         let bytesPerSecond = Double(bytes) / max(seconds, 0.001)
+        lastTransferBytesPerSecond = bytesPerSecond
+
         throughputChannel.record(
             sample: log2(bytesPerSecond),
             at: .now,

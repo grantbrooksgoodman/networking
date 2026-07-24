@@ -193,6 +193,22 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `2.0` (a spread of two doublings).
     public var throughputJitterCeiling: Double
 
+    /// The interval, in seconds, at which an active storage
+    /// transfer is checked for stalled progress.
+    ///
+    /// Default value is `2` seconds.
+    public var transferStallCheckInterval: TimeInterval
+
+    /// The duration, in seconds, without progress after which
+    /// an active storage transfer is considered stalled.
+    ///
+    /// A stalled transfer contributes a single failure sample,
+    /// degrading the score before the operation's timeout
+    /// fires.
+    ///
+    /// Default value is `8` seconds.
+    public var transferStallSeconds: TimeInterval
+
     // MARK: - Init
 
     /// Creates a configuration with the specified parameters.
@@ -221,7 +237,9 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         stabilityPenaltyWeight: Double = 0.4,
         throughputCeiling: Double = 22,
         throughputFloor: Double = 13,
-        throughputJitterCeiling: Double = 2
+        throughputJitterCeiling: Double = 2,
+        transferStallCheckInterval: TimeInterval = 2,
+        transferStallSeconds: TimeInterval = 8
     ) {
         self.adaptiveScoreThreshold = adaptiveScoreThreshold
         self.channelWeightLatency = channelWeightLatency
@@ -245,6 +263,8 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         self.throughputCeiling = throughputCeiling
         self.throughputFloor = throughputFloor
         self.throughputJitterCeiling = throughputJitterCeiling
+        self.transferStallCheckInterval = transferStallCheckInterval
+        self.transferStallSeconds = transferStallSeconds
     }
 
     // MARK: - Methods

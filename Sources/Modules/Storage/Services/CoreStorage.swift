@@ -400,38 +400,24 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[metadata.filePath] = nil
         $storedItemExistsResults[metadata.filePath] = nil
 
-        let healthStartTime = Date.now
-        let storageMetadata = metadata.asStorageMetadata(
-            prependingEnvironment: prependingEnvironment
-        )
-
-        if let onProgress {
+        let probe = TransferProgressProbe()
+        do {
             try await putDataObservingProgress(
                 data,
-                metadata: storageMetadata,
-                onProgress: onProgress
+                metadata: metadata.asStorageMetadata(
+                    prependingEnvironment: prependingEnvironment
+                ),
+                onProgress: { progress in
+                    probe.handleProgress(progress)
+                    onProgress?(progress)
+                }
             )
-        } else {
-            do {
-                _ = try await firebaseStorage.putDataAsync(
-                    data,
-                    metadata: storageMetadata
-                )
-            } catch {
-                throw Exception(
-                    error,
-                    metadata: .init(sender: self)
-                )
-            }
+        } catch {
+            probe.invalidate()
+            throw error
         }
 
-        let elapsed = Date.now.timeIntervalSince(healthStartTime)
-
-        Networking.config.healthDelegate.recordThroughputSample(
-            bytes: data.count,
-            seconds: elapsed
-        )
-
+        probe.finish(totalBytes: data.count)
         return nil
     }
 
@@ -711,39 +697,25 @@ final class CoreStorage: @unchecked Sendable {
         to localPath: URL,
         onProgress: (@Sendable (StorageTransferProgress) -> Void)? = nil
     ) async throws(Exception) {
-        let healthStartTime = Date.now
-
-        if let onProgress {
+        let probe = TransferProgressProbe()
+        do {
             try await writeFileObservingProgress(
                 at: path,
                 to: localPath,
-                onProgress: onProgress
+                onProgress: { progress in
+                    probe.handleProgress(progress)
+                    onProgress?(progress)
+                }
             )
-        } else {
-            do {
-                _ = try await firebaseStorage
-                    .child(path)
-                    .writeAsync(toFile: localPath)
-            } catch let error as Exception {
-                throw error
-            } catch {
-                throw Exception(
-                    error,
-                    metadata: .init(sender: self)
-                )
-            }
+        } catch {
+            probe.invalidate()
+            throw error
         }
 
-        let elapsed = Date.now.timeIntervalSince(healthStartTime)
-
-        if let fileSize = try? fileManager.attributesOfItem(
+        let fileSize = try? fileManager.attributesOfItem(
             atPath: localPath.path()
-        )[.size] as? Int {
-            Networking.config.healthDelegate.recordThroughputSample(
-                bytes: fileSize,
-                seconds: elapsed
-            )
-        }
+        )[.size] as? Int
+        probe.finish(totalBytes: fileSize)
     }
 
     // MARK: - Enumeration
