@@ -23,11 +23,12 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     nonisolated static let shared = NetworkHealthService()
 
+    private let estimator = HealthEstimator()
+    private let monitorQueue = DispatchQueue(label: "com.neotechnica.networking.health")
+    private let _connectionStabilityObserver = LockIsolated<ConnectionStabilityObserver?>(nil)
     private let _health = LockIsolated<NetworkHealth>(.unknown)
     private let _pathMonitor = LockIsolated<NWPathMonitor?>(nil)
     private let _pathState = LockIsolated<PathState>(.init())
-    private let estimator = HealthEstimator()
-    private let monitorQueue = DispatchQueue(label: "com.neotechnica.networking.health")
 
     // MARK: - Computed Properties
 
@@ -63,6 +64,8 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     }
 
     func recordCensoredLatencySample(seconds: TimeInterval) {
+        startConnectionStabilityMonitoringIfNeeded()
+
         Task {
             let updated = await estimator.recordCensoredLatency(
                 seconds: seconds,
@@ -76,6 +79,8 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     }
 
     func recordLatencySample(seconds: TimeInterval) {
+        startConnectionStabilityMonitoringIfNeeded()
+
         Task {
             let updated = await estimator.recordLatency(
                 seconds: seconds,
@@ -118,6 +123,14 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     func stopMonitoring() {
         _pathMonitor.wrappedValue?.cancel()
         _pathMonitor.wrappedValue = nil
+
+        let connectionStabilityObserver = _connectionStabilityObserver.projectedValue.withValue { observer -> ConnectionStabilityObserver? in
+            let current = observer
+            observer = nil
+            return current
+        }
+
+        connectionStabilityObserver?.stop()
     }
 
     // MARK: - Methods
@@ -132,10 +145,22 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         let scoreDescription = health.score.map { String(format: "%.2f", $0) } ?? "unknown"
         let tierDescription = health.tier?.rawValue ?? "unknown"
 
+        let socketDescription: String
+        if let connectionStabilityObserver = _connectionStabilityObserver.wrappedValue {
+            let reconnectDescription = connectionStabilityObserver.lastReconnectDuration.map {
+                String(format: "%.1fs", $0)
+            } ?? "none"
+
+            socketDescription = "Socket – connected: \(connectionStabilityObserver.connectedStateDescription), last reconnect: \(reconnectDescription)"
+        } else {
+            socketDescription = "Socket – unattached"
+        }
+
         return """
         Score: \(scoreDescription)
         Tier: \(tierDescription)
         \(summary)
+        \(socketDescription)
         """
     }
 
@@ -184,6 +209,27 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             domain: .Networking.health,
             sender: self
         )
+    }
+
+    /// Lazily attaches the connection stability observer on the
+    /// first database latency sample – evidence the app actually
+    /// uses the realtime database. An observer attached eagerly
+    /// would itself keep the realtime connection alive.
+    private func startConnectionStabilityMonitoringIfNeeded() {
+        guard Networking.config.networkHealthConfiguration.isConnectionStabilityMonitoringEnabled else { return }
+
+        let connectionStabilityObserver = _connectionStabilityObserver.projectedValue.withValue { observer -> ConnectionStabilityObserver? in
+            guard observer == nil else { return nil }
+
+            let created = ConnectionStabilityObserver { [weak self] event in
+                self?.record(event)
+            }
+
+            observer = created
+            return created
+        }
+
+        connectionStabilityObserver?.start()
     }
 }
 
@@ -271,6 +317,11 @@ private actor HealthEstimator {
         var score = (blendedLatency + blendedThroughput) / totalConfidence
 
         score *= 1 - failureRatePenalty(
+            at: now,
+            configuration: configuration
+        )
+
+        score *= 1 - stabilityPenalty(
             at: now,
             configuration: configuration
         )
@@ -523,6 +574,24 @@ private actor HealthEstimator {
         let penalty = configuration.failureRatePenaltyWeight *
             failureChannel.mean *
             min(decayedWeight, 1)
+
+        return min(max(penalty, 0), 1)
+    }
+
+    /// Returns the stability penalty in [0, 1] – the penalty
+    /// weight multiplied by the decayed flap count's fraction of
+    /// the flap ceiling, at which the penalty saturates.
+    private func stabilityPenalty(
+        at time: Date,
+        configuration: NetworkHealthConfiguration
+    ) -> Double {
+        let decayedFlapCount = flapChannel.decayedWeight(
+            at: time,
+            halfLife: configuration.halfLife
+        )
+
+        let penalty = configuration.stabilityPenaltyWeight *
+            min(decayedFlapCount / max(configuration.stabilityFlapCeiling, 0.001), 1)
 
         return min(max(penalty, 0), 1)
     }

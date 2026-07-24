@@ -658,6 +658,8 @@ Health estimation is built into the default Firebase-backed database and storage
 
 Database operation timeouts also contribute failure evidence, which penalizes the score while recent. High dispersion in a channel's sample history (jitter) reduces that channel's contribution – an unstable connection scores lower than a steady one with the same averages.
 
+When the app uses the realtime database, the health system additionally monitors the realtime client's own connection state. Unexpected socket drops in the foreground (flaps) penalize the score while recent; drops that coincide with going offline, backgrounding, or the grace period after foregrounding are ignored. Because an attached observer keeps the realtime connection alive, the observer attaches lazily – only after the first database operation produces a latency sample – so apps that use only storage or authentication never open a realtime connection. Set `isConnectionStabilityMonitoringEnabled` to `false` to disable this signal entirely.
+
 Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
 
 > **Note:** Only the built-in Firebase implementations are instrumented. Custom delegates registered through `Networking.config` are not observed by the health system.

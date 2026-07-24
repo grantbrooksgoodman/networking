@@ -67,6 +67,17 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `0.3`.
     public var fairTierThreshold: Double
 
+    /// The duration, in seconds, after the app returns to the
+    /// foreground during which realtime connection drops are
+    /// not counted as flaps.
+    ///
+    /// The realtime client deliberately drops its socket in the
+    /// background; reconnection churn around foregrounding is
+    /// app lifecycle, not network evidence.
+    ///
+    /// Default value is `10` seconds.
+    public var flapForegroundGraceSeconds: TimeInterval
+
     /// The score at or above which health is classified as
     /// ``NetworkHealthTier/good``.
     ///
@@ -81,6 +92,21 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     ///
     /// Default value is `30` seconds.
     public var halfLife: TimeInterval
+
+    /// A Boolean value that determines whether the realtime
+    /// client's connection stability is monitored as health
+    /// evidence.
+    ///
+    /// When enabled, the service passively observes the
+    /// realtime client's connection state and penalizes the
+    /// score when the socket drops unexpectedly. The observer
+    /// attaches lazily – only after the first database
+    /// operation produces a latency sample – because an active
+    /// observer keeps the realtime connection alive. Apps that
+    /// use only storage or authentication never attach it.
+    ///
+    /// Default value is `true`.
+    public var isConnectionStabilityMonitoringEnabled: Bool
 
     /// The weight of the per-channel score reduction applied as
     /// sample dispersion (jitter) grows.
@@ -131,6 +157,23 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `51200` (50 KB).
     public var minimumThroughputSampleBytes: Int
 
+    /// The decayed flap count at or above which the stability
+    /// penalty saturates.
+    ///
+    /// Default value is `3` – three connection flaps within one
+    /// half-life saturate the penalty.
+    public var stabilityFlapCeiling: Double
+
+    /// The weight of the multiplicative penalty applied to the
+    /// score as the realtime connection flaps.
+    ///
+    /// The penalty is this weight multiplied by the decayed
+    /// flap count's fraction of ``stabilityFlapCeiling``. A
+    /// value of `0` disables the penalty.
+    ///
+    /// Default value is `0.4`.
+    public var stabilityPenaltyWeight: Double
+
     /// The log₂(bytes per second) value at or above which the
     /// throughput channel maps to a score of approximately one.
     ///
@@ -164,14 +207,18 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         expensivePenalty: Double = 0.95,
         failureRatePenaltyWeight: Double = 0.5,
         fairTierThreshold: Double = 0.3,
+        flapForegroundGraceSeconds: TimeInterval = 10,
         goodTierThreshold: Double = 0.7,
         halfLife: TimeInterval = 30,
+        isConnectionStabilityMonitoringEnabled: Bool = true,
         jitterPenaltyWeight: Double = 0.3,
         latencyCeiling: TimeInterval = 3,
         latencyFloor: TimeInterval = 0.1,
         latencyJitterCeiling: Double = 1,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
+        stabilityFlapCeiling: Double = 3,
+        stabilityPenaltyWeight: Double = 0.4,
         throughputCeiling: Double = 22,
         throughputFloor: Double = 13,
         throughputJitterCeiling: Double = 2
@@ -183,14 +230,18 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         self.expensivePenalty = expensivePenalty
         self.failureRatePenaltyWeight = failureRatePenaltyWeight
         self.fairTierThreshold = fairTierThreshold
+        self.flapForegroundGraceSeconds = flapForegroundGraceSeconds
         self.goodTierThreshold = goodTierThreshold
         self.halfLife = halfLife
+        self.isConnectionStabilityMonitoringEnabled = isConnectionStabilityMonitoringEnabled
         self.jitterPenaltyWeight = jitterPenaltyWeight
         self.latencyCeiling = latencyCeiling
         self.latencyFloor = latencyFloor
         self.latencyJitterCeiling = latencyJitterCeiling
         self.minimumConfidence = minimumConfidence
         self.minimumThroughputSampleBytes = minimumThroughputSampleBytes
+        self.stabilityFlapCeiling = stabilityFlapCeiling
+        self.stabilityPenaltyWeight = stabilityPenaltyWeight
         self.throughputCeiling = throughputCeiling
         self.throughputFloor = throughputFloor
         self.throughputJitterCeiling = throughputJitterCeiling
