@@ -19,7 +19,9 @@ import Foundation
 ///
 /// The health value is derived from passive observation of the
 /// network operations the framework already performs – it
-/// generates no traffic of its own.
+/// generates no traffic of its own unless opt-in active
+/// probing is enabled through
+/// ``NetworkHealthConfiguration/probeConfiguration``.
 public enum NetworkHealth: Equatable, Sendable {
     // MARK: - Cases
 

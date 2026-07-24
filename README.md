@@ -600,7 +600,7 @@ The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum
 
 ### Health
 
-The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs.
+The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs. The only exception is strictly opt-in active probing, described below.
 
 > **Note:** Health monitoring starts automatically when you call `Networking.initialize()`. No additional setup is required.
 
@@ -669,6 +669,21 @@ When the app uses the realtime database, the health system additionally monitors
 Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
 
 > **Note:** Only the built-in Firebase implementations are instrumented. Custom delegates registered through `Networking.config` are not observed by the health system.
+
+#### Active Probing (Opt-In)
+
+By default the health system generates no traffic of its own. Supplying a [`NetworkHealthProbeConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthProbeConfiguration.swift) reverses that contract explicitly: when the health is read while `.unknown` – or after a network interface transition – the system may send a single rate-limited `HEAD` request to an endpoint you control, filling the idle-confidence gap:
+
+```swift
+var configuration = NetworkHealthConfiguration()
+configuration.probeConfiguration = .init(
+    url: URL(string: "https://api.example.com/health")!
+)
+
+Networking.config.setNetworkHealthConfiguration(configuration)
+```
+
+Probes never fire on a timer and never fire while health is measured. They are suppressed in the background, in Low Power Mode, on constrained or expensive paths (unless explicitly allowed), within `minimumIntervalSeconds` of the previous attempt, and beyond the hard `maximumProbesPerHour` budget. A successful probe contributes its round-trip latency; a network-level failure contributes failure evidence bounded by the probe timeout. Every attempt and outcome is logged to the `health` logger domain.
 
 ### Storage
 

@@ -231,16 +231,9 @@ struct GeminiService {
 
     private func recordNetworkFailure(_ error: any Error) {
         guard Networking.config.networkHealthConfiguration.isURLSessionMetricsEnabled,
-              let urlError = error as? URLError else { return }
+              let urlError = error as? URLError,
+              urlError.isNetworkLevelFailure else { return }
 
-        let networkFailureCodes: [URLError.Code] = [
-            .cannotConnectToHost,
-            .dnsLookupFailed,
-            .networkConnectionLost,
-            .timedOut,
-        ]
-
-        guard networkFailureCodes.contains(urlError.code) else { return }
         Networking.config.healthDelegate.record(
             .probeFailure(timeoutSeconds: urlSession.configuration.timeoutIntervalForRequest)
         )

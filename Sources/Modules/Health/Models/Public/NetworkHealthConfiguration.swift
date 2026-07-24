@@ -205,6 +205,20 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
     /// Default value is `51200` (50 KB).
     public var minimumThroughputSampleBytes: Int
 
+    /// The active probing configuration, or `nil` to disable
+    /// probing entirely.
+    ///
+    /// Probing is the health system's only source of
+    /// self-generated traffic and is strictly opt-in –
+    /// enabling it requires supplying an endpoint you control.
+    /// When configured, a rate-limited probe may be sent when
+    /// the health is read while ``NetworkHealth/unknown`` or
+    /// after a network interface transition, filling the
+    /// idle-confidence gap. Probes never fire on a timer.
+    ///
+    /// Default value is `nil`.
+    public var probeConfiguration: NetworkHealthProbeConfiguration?
+
     /// The decayed flap count at or above which the stability
     /// penalty saturates.
     ///
@@ -285,6 +299,7 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         legacyRadioScoreCap: Double = 0.4,
         minimumConfidence: Double = 0.5,
         minimumThroughputSampleBytes: Int = 51200,
+        probeConfiguration: NetworkHealthProbeConfiguration? = nil,
         stabilityFlapCeiling: Double = 3,
         stabilityPenaltyWeight: Double = 0.4,
         throughputCeiling: Double = 22,
@@ -314,6 +329,7 @@ public struct NetworkHealthConfiguration: Codable, Equatable, Sendable {
         self.legacyRadioScoreCap = legacyRadioScoreCap
         self.minimumConfidence = minimumConfidence
         self.minimumThroughputSampleBytes = minimumThroughputSampleBytes
+        self.probeConfiguration = probeConfiguration
         self.stabilityFlapCeiling = stabilityFlapCeiling
         self.stabilityPenaltyWeight = stabilityPenaltyWeight
         self.throughputCeiling = throughputCeiling

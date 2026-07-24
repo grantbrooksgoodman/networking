@@ -33,12 +33,22 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
     private let _health = LockIsolated<NetworkHealth>(.unknown)
     private let _pathMonitor = LockIsolated<NWPathMonitor?>(nil)
     private let _pathState = LockIsolated<PathState>(.init())
+    private let _prober = LockIsolated<NetworkHealthProber?>(nil)
     private let _radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
 
     // MARK: - Computed Properties
 
     var health: NetworkHealth {
-        _health.wrappedValue
+        let health = _health.wrappedValue
+
+        // Probing exists to fill the idle-confidence gap: an
+        // unknown read is the demand signal. The read itself
+        // stays synchronous and non-blocking.
+        if health.isUnknown {
+            maybeProbe()
+        }
+
+        return health
     }
 
     // MARK: - Init
@@ -85,17 +95,7 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
     func recordLatencySample(seconds: TimeInterval) {
         startConnectionStabilityMonitoringIfNeeded()
-
-        Task {
-            let updated = await estimator.recordLatency(
-                seconds: seconds,
-                isOnline: isOnline,
-                pathState: _pathState.wrappedValue,
-                configuration: Networking.config.networkHealthConfiguration
-            )
-
-            publish(updated)
-        }
+        submitLatencySample(seconds: seconds)
     }
 
     func recordThroughputSample(
@@ -163,11 +163,20 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             socketDescription = "Socket – unattached"
         }
 
+        let probeDescription = if configuration.probeConfiguration == nil {
+            "Probing: disabled"
+        } else if let prober = _prober.wrappedValue {
+            "Probing: \(prober.statsDescription)"
+        } else {
+            "Probing: enabled, no attempts"
+        }
+
         return """
         Score: \(scoreDescription)
         Tier: \(tierDescription)
         \(summary)
         \(socketDescription)
+        \(probeDescription)
         """
     }
 
@@ -203,6 +212,10 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
 
             publish(updated)
         }
+
+        // Give the new path a moment to settle before probing
+        // to rebuild confidence on it.
+        maybeProbe(afterDelay: .seconds(2))
     }
 
     private func handleRadioTechnologyChange() {
@@ -223,6 +236,42 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
             )
 
             publish(updated)
+        }
+    }
+
+    /// Fire-and-forget probe trigger; bails immediately when
+    /// probing is unconfigured so unconfigured behavior is
+    /// identical to baseline.
+    private func maybeProbe(afterDelay delay: Duration? = nil) {
+        guard Networking.config.networkHealthConfiguration.probeConfiguration != nil else { return }
+        let prober = proberCreatingIfNeeded()
+        Task {
+            if let delay {
+                try? await Task.sleep(for: delay)
+            }
+
+            await prober.maybeProbe()
+        }
+    }
+
+    private func proberCreatingIfNeeded() -> NetworkHealthProber {
+        _prober.projectedValue.withValue { prober in
+            if let prober { return prober }
+
+            let created = NetworkHealthProber(
+                onEvent: { [weak self] event in
+                    self?.record(event)
+                },
+                onLatencySample: { [weak self] seconds in
+                    self?.submitLatencySample(seconds: seconds)
+                },
+                pathStateProvider: { [weak self] in
+                    self?._pathState.wrappedValue ?? .init()
+                }
+            )
+
+            prober = created
+            return created
         }
     }
 
@@ -286,6 +335,22 @@ final class NetworkHealthService: NetworkHealthDelegate, @unchecked Sendable {
         }
 
         connectionStabilityObserver?.start()
+    }
+
+    /// Feeds a latency sample into the estimator without the
+    /// connection-stability attach trigger – probe round-trips
+    /// are not evidence of realtime database use.
+    private func submitLatencySample(seconds: TimeInterval) {
+        Task {
+            let updated = await estimator.recordLatency(
+                seconds: seconds,
+                isOnline: isOnline,
+                pathState: _pathState.wrappedValue,
+                configuration: Networking.config.networkHealthConfiguration
+            )
+
+            publish(updated)
+        }
     }
 }
 
