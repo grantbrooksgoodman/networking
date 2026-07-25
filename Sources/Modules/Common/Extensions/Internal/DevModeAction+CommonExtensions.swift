@@ -56,9 +56,9 @@ extension DevModeAction {
                             "Confidence:",
                             "Failures:",
                             "Flaps:",
-                            "Last Probing:",
                             "Latency:",
                             "Path:",
+                            "Probing:",
                             "Score:",
                             "Socket:",
                             "Stalls:",
@@ -95,13 +95,41 @@ extension DevModeAction {
             }
         }
 
-        return .init(
+        return DevModeAction(
             title: "Inspect Network Health",
             perform: inspectNetworkHealth
         )
     }
 
-    static var switchEnvironmentAction: DevModeAction {
+    static var networkingOptionsAction: DevModeAction {
+        @Sendable
+        func networkingOptions() {
+            Task { @MainActor in
+                let actions: [AKAction] = [
+                    inspectNetworkHealthAction,
+                    switchEnvironmentAction,
+                    toggleNetworkActivityIndicatorAction,
+                ].map {
+                    AKAction(
+                        $0.title,
+                        effect: $0.perform
+                    )
+                }
+
+                await AKActionSheet(
+                    title: "Networking Options",
+                    actions: actions
+                ).present(translating: [])
+            }
+        }
+
+        return DevModeAction(
+            title: "Networking Options",
+            perform: networkingOptions
+        )
+    }
+
+    private static var switchEnvironmentAction: DevModeAction {
         @Sendable
         func switchEnvironment() {
             Task {
@@ -165,13 +193,13 @@ extension DevModeAction {
             }
         }
 
-        return .init(
+        return DevModeAction(
             title: "Switch Environment",
             perform: switchEnvironment
         )
     }
 
-    static var toggleNetworkActivityIndicatorAction: DevModeAction {
+    private static var toggleNetworkActivityIndicatorAction: DevModeAction {
         @Sendable
         func toggleNetworkActivityIndicator() {
             @Dependency(\.coreKit.hud) var coreHUD: CoreKit.HUD
@@ -187,7 +215,7 @@ extension DevModeAction {
             coreHUD.showSuccess(text: !value == true ? "ON" : "OFF")
         }
 
-        return .init(
+        return DevModeAction(
             title: "Toggle Network Activity Indicator",
             perform: toggleNetworkActivityIndicator
         )

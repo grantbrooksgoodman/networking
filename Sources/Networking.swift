@@ -124,9 +124,7 @@ public enum Networking {
         FirebaseApp.configure()
         didInitialize = true
 
-        DevModeService.insertAction(.inspectNetworkHealthAction, at: 0)
-        DevModeService.insertAction(.switchEnvironmentAction, at: 1)
-        DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 2)
+        DevModeService.insertAction(.networkingOptionsAction, at: 0)
 
         Task.background {
             config.healthDelegate.startMonitoring()
@@ -178,6 +176,19 @@ public extension Networking {
         /// ``setIsEnhancedDialogTranslationEnabled(_:)``.
         @LockIsolated public private(set) var isEnhancedDialogTranslationEnabled = false
 
+        /// The active network health estimation
+        /// configuration.
+        ///
+        /// This value controls the scoring parameters
+        /// used by the health estimator, including
+        /// channel weights, ramp anchors, and tier
+        /// boundaries. The default configuration is
+        /// suitable for most use cases.
+        ///
+        /// To change this value, call
+        /// ``setNetworkHealthConfiguration(_:)``.
+        @LockIsolated public private(set) var networkHealthConfiguration = NetworkHealthConfiguration.default
+
         @LockIsolated package private(set) var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         @LockIsolated package private(set) var authDelegate: AuthDelegate = Auth()
         @LockIsolated package private(set) var databaseDelegate: DatabaseDelegate = Database()
@@ -187,7 +198,6 @@ public extension Networking {
 
         private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(nil)
         private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(nil)
-        private let _networkHealthConfiguration = LockIsolated<NetworkHealthConfiguration>(.default)
 
         /* MARK: Computed Properties */
 
@@ -223,21 +233,6 @@ public extension Networking {
             _geminiAPIKeyDelegate.wrappedValue
         }
 
-        /// The active network health estimation
-        /// configuration.
-        ///
-        /// This value controls the scoring parameters
-        /// used by the health estimator, including
-        /// channel weights, ramp anchors, and tier
-        /// boundaries. The default configuration is
-        /// suitable for most use cases.
-        ///
-        /// To change this value, call
-        /// ``setNetworkHealthConfiguration(_:)``.
-        public var networkHealthConfiguration: NetworkHealthConfiguration {
-            _networkHealthConfiguration.wrappedValue
-        }
-
         /* MARK: Init */
 
         private init() {
@@ -258,7 +253,9 @@ public extension Networking {
         ///
         /// - Parameter environment: The environment to
         ///   activate.
-        public func setEnvironment(_ environment: NetworkEnvironment) {
+        public func setEnvironment(
+            _ environment: NetworkEnvironment
+        ) {
             @Persistent(.networkEnvironment) var persistedValue: NetworkEnvironment?
             persistedValue = environment
         }
@@ -277,7 +274,9 @@ public extension Networking {
         /// - Parameter enhancedTranslationStatusVerbosity:
         ///   The verbosity level to use, or `nil` to
         ///   disable status messages.
-        public func setEnhancedTranslationStatusVerbosity(_ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?) {
+        public func setEnhancedTranslationStatusVerbosity(
+            _ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?
+        ) {
             _enhancedTranslationStatusVerbosity.wrappedValue = enhancedTranslationStatusVerbosity
         }
 
@@ -288,7 +287,9 @@ public extension Networking {
         ///   A Boolean value that determines whether
         ///   AI enhancement is applied to dialog
         ///   translations.
-        public func setIsEnhancedDialogTranslationEnabled(_ isEnhancedDialogTranslationEnabled: Bool) {
+        public func setIsEnhancedDialogTranslationEnabled(
+            _ isEnhancedDialogTranslationEnabled: Bool
+        ) {
             self.isEnhancedDialogTranslationEnabled = isEnhancedDialogTranslationEnabled
         }
 
@@ -297,8 +298,10 @@ public extension Networking {
         ///
         /// - Parameter networkHealthConfiguration: The
         ///   configuration to use.
-        public func setNetworkHealthConfiguration(_ networkHealthConfiguration: NetworkHealthConfiguration) {
-            _networkHealthConfiguration.wrappedValue = networkHealthConfiguration
+        public func setNetworkHealthConfiguration(
+            _ networkHealthConfiguration: NetworkHealthConfiguration
+        ) {
+            self.networkHealthConfiguration = networkHealthConfiguration
         }
 
         /* MARK: Delegate Registration */
@@ -377,7 +380,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``NetworkActivityIndicatorDelegate``
-        public func registerActivityIndicatorDelegate(_ activityIndicatorDelegate: NetworkActivityIndicatorDelegate) {
+        public func registerActivityIndicatorDelegate(
+            _ activityIndicatorDelegate: NetworkActivityIndicatorDelegate
+        ) {
             register(activityIndicatorDelegate: activityIndicatorDelegate)
         }
 
@@ -387,7 +392,9 @@ public extension Networking {
         ///   register.
         ///
         /// - SeeAlso: ``AuthDelegate``
-        public func registerAuthDelegate(_ authDelegate: AuthDelegate) {
+        public func registerAuthDelegate(
+            _ authDelegate: AuthDelegate
+        ) {
             register(authDelegate: authDelegate)
         }
 
@@ -397,7 +404,9 @@ public extension Networking {
         ///   register.
         ///
         /// - SeeAlso: ``NetworkHealthDelegate``
-        public func registerHealthDelegate(_ healthDelegate: NetworkHealthDelegate) {
+        public func registerHealthDelegate(
+            _ healthDelegate: NetworkHealthDelegate
+        ) {
             register(healthDelegate: healthDelegate)
         }
 
@@ -408,7 +417,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``HostedTranslationDelegate``
-        public func registerHostedTranslationDelegate(_ hostedTranslationDelegate: HostedTranslationDelegate) {
+        public func registerHostedTranslationDelegate(
+            _ hostedTranslationDelegate: HostedTranslationDelegate
+        ) {
             register(hostedTranslationDelegate: hostedTranslationDelegate)
         }
 
@@ -418,7 +429,9 @@ public extension Networking {
         ///   to register.
         ///
         /// - SeeAlso: ``DatabaseDelegate``
-        public func registerDatabaseDelegate(_ databaseDelegate: DatabaseDelegate) {
+        public func registerDatabaseDelegate(
+            _ databaseDelegate: DatabaseDelegate
+        ) {
             register(databaseDelegate: databaseDelegate)
         }
 
@@ -428,7 +441,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``GeminiAPIKeyDelegate``
-        public func registerGeminiAPIKeyDelegate(_ geminiAPIKeyDelegate: GeminiAPIKeyDelegate) {
+        public func registerGeminiAPIKeyDelegate(
+            _ geminiAPIKeyDelegate: GeminiAPIKeyDelegate
+        ) {
             register(geminiAPIKeyDelegate: geminiAPIKeyDelegate)
         }
 
@@ -438,7 +453,9 @@ public extension Networking {
         ///   register.
         ///
         /// - SeeAlso: ``StorageDelegate``
-        public func registerStorageDelegate(_ storageDelegate: StorageDelegate) {
+        public func registerStorageDelegate(
+            _ storageDelegate: StorageDelegate
+        ) {
             register(storageDelegate: storageDelegate)
         }
     }

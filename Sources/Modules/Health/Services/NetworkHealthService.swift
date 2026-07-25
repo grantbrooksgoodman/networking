@@ -206,7 +206,7 @@ struct NetworkHealthService: NetworkHealthDelegate {
         Socket: \(socketDescription)
         Transfer: \(transferDescription)
 
-        Last Probing: \(probeDescription)
+        Probing: \(probeDescription)
         """
     }
 
@@ -396,7 +396,9 @@ struct NetworkHealthService: NetworkHealthDelegate {
     /// Runs an estimator update off the caller's thread –
     /// recording stays fire-and-forget – and publishes the
     /// resulting health value.
-    private func updateHealth(_ update: @escaping @Sendable (HealthEstimator, EstimatorContext) async -> NetworkHealth) {
+    private func updateHealth(
+        _ update: @escaping @Sendable (HealthEstimator, EstimatorContext) async -> NetworkHealth
+    ) {
         Task {
             await publish(update(estimator, estimatorContext))
         }
@@ -414,7 +416,7 @@ private struct EstimatorContext {
 }
 
 /// A point-in-time snapshot of the estimator's channel state,
-/// used to build the Dev Mode inspection summary.
+/// used to build the Developer Mode inspection summary.
 private struct EstimatorStatistics {
     // MARK: - Properties
 

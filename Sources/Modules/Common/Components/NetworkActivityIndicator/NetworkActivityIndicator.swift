@@ -34,35 +34,41 @@ struct NetworkActivityIndicator: View {
     // MARK: - View
 
     var body: some View {
-        Circle()
-            .if(
-                UIApplication.isFullyV26Compatible
-            ) {
-                $0.foregroundStyle(.clear)
-            } else: {
-                $0.foregroundStyle(viewModel.backgroundColor ?? .accent)
-            }
-            .padding(.all, Floats.padding)
-            .frame(
-                width: Floats.frameWidth,
-                height: Floats.frameHeight
-            )
-            .overlay {
-                ProgressView()
-                    .dynamicTypeSize(.large)
-                    .tint(viewModel.progressViewTintColor)
-            }
-            .if(UIApplication.isFullyV26Compatible) {
-                $0.glassEffect(
-                    isClear: viewModel.backgroundColor == nil,
-                    padding: -1,
-                    shape: Circle(),
-                    tint: (viewModel.backgroundColor ?? Colors.glassEffectTint)
-                        .opacity(Floats.glassEffectTintOpacity)
+        Button {
+            viewModel.send(.indicatorTapped)
+        } label: {
+            Circle()
+                .if(
+                    UIApplication.isFullyV26Compatible
+                ) {
+                    $0.foregroundStyle(.clear)
+                } else: {
+                    $0.foregroundStyle(viewModel.backgroundColor ?? .accent)
+                }
+                .padding(.all, Floats.padding)
+                .frame(
+                    width: Floats.frameWidth,
+                    height: Floats.frameHeight
                 )
-            }
-            .offset(y: viewModel.yOffset)
-            .opacity(viewModel.isVisible ? 1 : 0)
-            .animation(.spring(), value: viewModel.yOffset)
+                .overlay {
+                    ProgressView()
+                        .dynamicTypeSize(.large)
+                        .tint(viewModel.progressViewTintColor)
+                }
+                .if(UIApplication.isFullyV26Compatible) {
+                    $0.glassEffect(
+                        isClear: viewModel.backgroundColor == nil,
+                        padding: -1,
+                        shape: Circle(),
+                        tint: (viewModel.backgroundColor ?? Colors.glassEffectTint)
+                            .opacity(Floats.glassEffectTintOpacity)
+                    )
+                }
+        }
+        .allowsHitTesting(viewModel.isVisible)
+        .buttonStyle(.plain)
+        .offset(y: viewModel.yOffset)
+        .opacity(viewModel.isVisible ? 1 : 0)
+        .animation(.spring(), value: viewModel.yOffset)
     }
 }

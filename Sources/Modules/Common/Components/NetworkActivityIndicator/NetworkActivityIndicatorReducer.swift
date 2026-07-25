@@ -16,12 +16,15 @@ struct NetworkActivityIndicatorReducer: Reducer {
     // MARK: - Dependencies
 
     @Dependency(\.build) private var build: Build
+    @Dependency(\.coreKit.ui) private var coreUI: CoreKit.UI
+    @Dependency(\.uiApplication) private var uiApplication: UIApplication
 
     // MARK: - Actions
 
     enum Action {
         case backgroundColorChanged(Color?)
         case hideIndicator
+        case indicatorTapped
         case isVisibleChanged(Bool)
     }
 
@@ -63,6 +66,24 @@ struct NetworkActivityIndicatorReducer: Reducer {
             guard state.isVisible else { return .none }
             state.isVisible = false
             state.yOffset = State.Floats.hiddenYOffset
+
+        case .indicatorTapped:
+            guard state.isVisible,
+                  !uiApplication.isPresentingAlertController,
+                  uiApplication.presentedViews.first(where: {
+                      $0.tag == coreUI.semTag(for: "OVERLAY_VIEW")
+                  }) == nil else { return .none }
+
+            return .fireAndForget { @MainActor in
+                guard let tapAction = Networking
+                    .config
+                    .activityIndicatorDelegate
+                    .tapAction else {
+                    return DevModeAction.inspectNetworkHealthAction.perform()
+                }
+
+                tapAction()
+            }
 
         case let .isVisibleChanged(isVisible):
             @Persistent(.isNetworkActivityIndicatorEnabled) var isNetworkActivityIndicatorEnabled: Bool?

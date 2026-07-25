@@ -37,6 +37,14 @@ public protocol NetworkActivityIndicatorDelegate {
     @MainActor
     var progressViewTintColor: Color? { get }
 
+    /// The action to perform when the indicator is tapped.
+    ///
+    /// Return `nil` to use the default behavior, which
+    /// presents an alert summarizing the current network
+    /// health.
+    @MainActor
+    var tapAction: (() -> Void)? { get }
+
     // MARK: - Methods
 
     /// Shows the network activity indicator.
@@ -92,5 +100,27 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
         Task { @MainActor in
             Observables.isNetworkActivityOccurring.value = false
         }
+    }
+}
+
+public extension NetworkActivityIndicatorDelegate {
+    /// The background color of the indicator.
+    ///
+    /// This default implementation returns `nil`, which
+    /// causes the indicator's background color to adopt
+    /// a system blue color.
+    @MainActor
+    var backgroundColor: Color? {
+        nil
+    }
+
+    /// The action to perform when the indicator is tapped.
+    ///
+    /// This default implementation returns `nil`, which
+    /// causes the indicator to present an alert summarizing
+    /// the current network health.
+    @MainActor
+    var tapAction: (() -> Void)? {
+        nil
     }
 }

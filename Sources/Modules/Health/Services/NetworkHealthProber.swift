@@ -57,8 +57,8 @@ struct NetworkHealthProber {
 
     // MARK: - Computed Properties
 
-    /// A human-readable summary of probe activity for the Dev
-    /// Mode inspection surface.
+    /// A human-readable summary of probe activity for the
+    /// Developer Mode inspection surface.
     var statsDescription: String {
         let maximumProbesPerHour = Networking.config.networkHealthConfiguration.probeConfiguration?.maximumProbesPerHour ?? 0
         let now = Date.now
@@ -68,12 +68,12 @@ struct NetworkHealthProber {
             let remainingBudget = max(maximumProbesPerHour - state.probeAttempts.count, 0)
 
             guard let lastAttemptAt = state.lastAttemptAt else {
-                return "never · budget \(remainingBudget)/\(maximumProbesPerHour)"
+                return "never · ℛ \(remainingBudget)/\(maximumProbesPerHour)"
             }
 
             let secondsAgo = Int(now.timeIntervalSince(lastAttemptAt))
             let outcomeDescription = state.lastOutcomeDescription ?? "in flight"
-            return "\(secondsAgo)s ago (\(outcomeDescription)) · budget \(remainingBudget)/\(maximumProbesPerHour)"
+            return "\(secondsAgo)s ago (\(outcomeDescription)) · \(remainingBudget)/\(maximumProbesPerHour) rem."
         }
     }
 
