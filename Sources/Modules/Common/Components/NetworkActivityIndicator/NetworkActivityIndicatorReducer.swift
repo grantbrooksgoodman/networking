@@ -16,8 +16,6 @@ struct NetworkActivityIndicatorReducer: Reducer {
     // MARK: - Dependencies
 
     @Dependency(\.build) private var build: Build
-    @Dependency(\.coreKit.ui) private var coreUI: CoreKit.UI
-    @Dependency(\.uiApplication) private var uiApplication: UIApplication
 
     // MARK: - Actions
 
@@ -50,6 +48,18 @@ struct NetworkActivityIndicatorReducer: Reducer {
         /* MARK: Computed Properties */
 
         @MainActor
+        var allowsHitTesting: Bool {
+            @Dependency(\.coreKit.ui) var coreUI: CoreKit.UI
+            @Dependency(\.uiApplication) var uiApplication: UIApplication
+            guard isVisible,
+                  !uiApplication.isPresentingAlertController,
+                  uiApplication.presentedViews.first(where: {
+                      $0.tag == coreUI.semTag(for: "OVERLAY_VIEW")
+                  }) == nil else { return false }
+            return true
+        }
+
+        @MainActor
         var progressViewTintColor: Color? {
             Networking.config.activityIndicatorDelegate.progressViewTintColor
         }
@@ -68,12 +78,7 @@ struct NetworkActivityIndicatorReducer: Reducer {
             state.yOffset = State.Floats.hiddenYOffset
 
         case .indicatorTapped:
-            guard state.isVisible,
-                  !uiApplication.isPresentingAlertController,
-                  uiApplication.presentedViews.first(where: {
-                      $0.tag == coreUI.semTag(for: "OVERLAY_VIEW")
-                  }) == nil else { return .none }
-
+            guard state.allowsHitTesting else { return .none }
             return .fireAndForget { @MainActor in
                 guard let tapAction = Networking
                     .config

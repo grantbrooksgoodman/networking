@@ -17,9 +17,10 @@ import AppSubsystem
 /// caller to successfully ``claim()`` the token owns the
 /// recording; all subsequent callers are rejected.
 ///
-/// This mirrors the `OperationCompletion` pattern
-/// (`@LockIsolated didComplete`) already used for continuation
-/// safety, applied independently to health sample recording.
+/// This mirrors the settle-once pattern used by
+/// `GuardedOperation` (`@LockIsolated didSettle`) for
+/// continuation safety, applied independently to health
+/// sample recording.
 struct HealthSampleToken {
     // MARK: - Properties
 

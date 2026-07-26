@@ -21,7 +21,6 @@ final class CoreStorage: @unchecked Sendable {
 
     @Dependency(\.fileManager) private var fileManager: FileManager
     @Dependency(\.firebaseStorage) private var firebaseStorage: StorageReference
-    @Dependency(\.build.isOnline) private var isOnline: Bool
 
     // MARK: - Properties
 
@@ -69,9 +68,7 @@ final class CoreStorage: @unchecked Sendable {
         timeout duration: Duration
     ) async throws(Exception) -> Any? {
         let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
-        let resolvedGlobalRawValue = globalCacheStrategy.map {
-            Self.resolvedStrategy($0).rawValue
-        } ?? ""
+        let resolvedGlobalRawValue = globalCacheStrategy.map(\.resolved.rawValue) ?? ""
 
         return try await Self.coalescer(
             String.fromCurrentEditorContext(
@@ -90,19 +87,16 @@ final class CoreStorage: @unchecked Sendable {
                 ))
             }
 
-            return await withCheckedContinuation { continuation in
-                self._performOperation(
+            do throws(Exception) {
+                let result = try await _performOperation(
                     resolvedOperation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
-                ) { result in
-                    switch result {
-                    case let .success(value):
-                        continuation.resume(returning: .success(value))
-                    case let .failure(exception):
-                        continuation.resume(returning: .failure(exception))
-                    }
-                }
+                )
+
+                return .success(result)
+            } catch {
+                return .failure(error)
             }
         }.get()
     }
@@ -110,121 +104,106 @@ final class CoreStorage: @unchecked Sendable {
     private func _performOperation(
         _ operation: StorageOperation,
         prependingEnvironment: Bool,
-        timeout duration: Duration,
-        completion: @escaping (Result<Any?, Exception>) -> Void
-    ) {
-        guard Networking.isReadWriteEnabled else {
-            return completion(.failure(
-                .Networking.readWriteAccessDisabled(.init(sender: self))
-            ))
-        }
-
-        guard isOnline else {
-            return completion(.failure(
-                .internetConnectionOffline(metadata: .init(sender: self))
-            ))
-        }
-
-        let completion = OperationCompletion(completion)
-        let timeout = Timeout(after: duration) {
-            completion(.failure(
-                .timedOut(metadata: .init(sender: self))
-            ))
-        }
-
-        Task {
-            do throws(Exception) {
-                let result: Any? = switch operation {
-                case let .deleteAllItems(
-                    atPath: path,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories
-                ):
-                    try await deleteAllItems(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+        timeout duration: Duration
+    ) async throws(Exception) -> Any? {
+        try await GuardedOperation.run(
+            timeout: duration,
+            recordsCensoredSampleOnTimeout: false,
+            showsActivityIndicator: true,
+            sender: self
+        ) { _, settle in
+            Task {
+                do throws(Exception) {
+                    let result: Any? = switch operation {
+                    case let .deleteAllItems(
+                        atPath: path,
                         includeItemsInSubdirectories: includeItemsInSubdirectories
-                    )
+                    ):
+                        try await deleteAllItems(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            includeItemsInSubdirectories: includeItemsInSubdirectories
+                        )
 
-                case let .deleteItem(
-                    atPath: path
-                ):
-                    try await deleteItem(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path
-                    )
+                    case let .deleteItem(
+                        atPath: path
+                    ):
+                        try await deleteItem(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                        )
 
-                case let .downloadAllItems(
-                    atPath: path,
-                    toDirectory: localDirectory,
-                    includeItemsInSubdirectories: includeItemsInSubdirectories,
-                    cacheStrategy: cacheStrategy
-                ):
-                    try await downloadAllItems(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                    case let .downloadAllItems(
+                        atPath: path,
                         toDirectory: localDirectory,
                         includeItemsInSubdirectories: includeItemsInSubdirectories,
-                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
-                    )
+                        cacheStrategy: cacheStrategy
+                    ):
+                        try await downloadAllItems(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            toDirectory: localDirectory,
+                            includeItemsInSubdirectories: includeItemsInSubdirectories,
+                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                        )
 
-                case let .downloadItem(
-                    atPath: path,
-                    toLocalPath: localPath,
-                    cacheStrategy: cacheStrategy
-                ):
-                    try await downloadItem(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                        to: localPath,
-                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
-                    )
+                    case let .downloadItem(
+                        atPath: path,
+                        toLocalPath: localPath,
+                        cacheStrategy: cacheStrategy
+                    ):
+                        try await downloadItem(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            to: localPath,
+                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                        )
 
-                case let .enumerateEmptyDirectories(
-                    startingAt: path
-                ):
-                    try await enumerateEmptyDirectories(
-                        startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
-                    )
+                    case let .enumerateEmptyDirectories(
+                        startingAt: path
+                    ):
+                        try await enumerateEmptyDirectories(
+                            startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                        )
 
-                case let .getDirectoryListing(
-                    atPath: path,
-                    firstResultOnly: firstResultOnly
-                ):
-                    try await getDirectoryListing(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                    case let .getDirectoryListing(
+                        atPath: path,
                         firstResultOnly: firstResultOnly
-                    )
+                    ):
+                        try await getDirectoryListing(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            firstResultOnly: firstResultOnly
+                        )
 
-                case let .itemExists(
-                    asItemType: itemType,
-                    atPath: path,
-                    cacheStrategy: cacheStrategy
-                ):
-                    try await itemExists(
-                        as: itemType,
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                        cacheStrategy: Self.resolvedStrategy(globalCacheStrategy ?? cacheStrategy)
-                    )
+                    case let .itemExists(
+                        asItemType: itemType,
+                        atPath: path,
+                        cacheStrategy: cacheStrategy
+                    ):
+                        try await itemExists(
+                            as: itemType,
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                        )
 
-                case let .sizeInKilobytes(
-                    ofItemAtPath: path
-                ):
-                    try await sizeInKilobytes(
-                        ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
-                    )
+                    case let .sizeInKilobytes(
+                        ofItemAtPath: path
+                    ):
+                        try await sizeInKilobytes(
+                            ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
+                        )
 
-                case let .upload(
-                    data,
-                    metadata: metadata
-                ):
-                    try await upload(
+                    case let .upload(
                         data,
-                        metadata: metadata,
-                        prependingEnvironment: prependingEnvironment
-                    )
-                }
+                        metadata: metadata
+                    ):
+                        try await upload(
+                            data,
+                            metadata: metadata,
+                            prependingEnvironment: prependingEnvironment
+                        )
+                    }
 
-                timeout.cancel()
-                completion(.success(result))
-            } catch {
-                timeout.cancel()
-                completion(.failure(error))
+                    settle(.success(result))
+                } catch {
+                    settle(.failure(error))
+                }
             }
         }
     }
@@ -238,75 +217,17 @@ final class CoreStorage: @unchecked Sendable {
         cacheStrategy: CacheStrategy,
         timeout duration: Duration
     ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
-        let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
-            bufferingPolicy: .unbounded
-        )
-
-        guard Networking.isReadWriteEnabled else {
-            continuation.finish(
-                throwing: Exception.Networking.readWriteAccessDisabled(
-                    .init(sender: self)
-                )
-            )
-
-            return stream
-        }
-
-        guard isOnline else {
-            continuation.finish(
-                throwing: Exception.internetConnectionOffline(
-                    metadata: .init(sender: self)
-                )
-            )
-
-            return stream
-        }
-
         let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
-        let cacheStrategy = Self.resolvedStrategy(globalCacheStrategy ?? Self.resolvedStrategy(cacheStrategy))
+        let cacheStrategy = (globalCacheStrategy ?? cacheStrategy).resolved
 
-        let timeout = Timeout(after: duration) {
-            continuation.finish(
-                throwing: Exception.timedOut(
-                    metadata: .init(sender: self)
-                )
+        return transferProgressStream(timeout: duration) { service, onProgress async throws(Exception) in
+            _ = try await service.downloadItem(
+                at: path,
+                to: localPath,
+                cacheStrategy: cacheStrategy,
+                onProgress: onProgress
             )
         }
-
-        let task = Task { [weak self] in
-            guard let self else {
-                timeout.cancel()
-                continuation.finish(
-                    throwing: Exception(
-                        "Service has been deallocated.",
-                        metadata: .init(sender: Self.self)
-                    )
-                )
-
-                return
-            }
-
-            do throws(Exception) {
-                _ = try await downloadItem(
-                    at: path,
-                    to: localPath,
-                    cacheStrategy: cacheStrategy,
-                    onProgress: { continuation.yield($0) }
-                )
-
-                timeout.cancel()
-                continuation.finish()
-            } catch {
-                timeout.cancel()
-                continuation.finish(throwing: error)
-            }
-        }
-
-        continuation.onTermination = { _ in
-            task.cancel()
-        }
-
-        return stream
     }
 
     func uploadWithProgress(
@@ -315,27 +236,31 @@ final class CoreStorage: @unchecked Sendable {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
+        transferProgressStream(timeout: duration) { service, onProgress async throws(Exception) in
+            _ = try await service.upload(
+                data,
+                metadata: metadata,
+                prependingEnvironment: prependingEnvironment,
+                onProgress: onProgress
+            )
+        }
+    }
+
+    private func transferProgressStream(
+        timeout duration: Duration,
+        _ transfer: @escaping @Sendable (
+            _ service: CoreStorage,
+            _ onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+        ) async throws(Exception) -> Void
+    ) -> AsyncThrowingStream<StorageTransferProgress, any Error> {
         let (stream, continuation) = AsyncThrowingStream<StorageTransferProgress, any Error>.makeStream(
             bufferingPolicy: .unbounded
         )
 
-        guard Networking.isReadWriteEnabled else {
-            continuation.finish(
-                throwing: Exception.Networking.readWriteAccessDisabled(
-                    .init(sender: self)
-                )
-            )
-
-            return stream
-        }
-
-        guard isOnline else {
-            continuation.finish(
-                throwing: Exception.internetConnectionOffline(
-                    metadata: .init(sender: self)
-                )
-            )
-
+        do throws(Exception) {
+            try GuardedOperation.checkPreconditions(sender: self)
+        } catch {
+            continuation.finish(throwing: error)
             return stream
         }
 
@@ -361,13 +286,7 @@ final class CoreStorage: @unchecked Sendable {
             }
 
             do throws(Exception) {
-                _ = try await upload(
-                    data,
-                    metadata: metadata,
-                    prependingEnvironment: prependingEnvironment,
-                    onProgress: { continuation.yield($0) }
-                )
-
+                try await transfer(self) { continuation.yield($0) }
                 timeout.cancel()
                 continuation.finish()
             } catch {
@@ -400,24 +319,19 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[metadata.filePath] = nil
         $storedItemExistsResults[metadata.filePath] = nil
 
-        let probe = TransferProgressProbe()
-        do {
+        try await TransferProgressProbe.measure(
+            totalBytes: data.count,
+            onProgress: onProgress
+        ) { onProgress async throws(Exception) in
             try await putDataObservingProgress(
                 data,
                 metadata: metadata.asStorageMetadata(
                     prependingEnvironment: prependingEnvironment
                 ),
-                onProgress: { progress in
-                    probe.handleProgress(progress)
-                    onProgress?(progress)
-                }
+                onProgress: onProgress
             )
-        } catch {
-            probe.invalidate()
-            throw error
         }
 
-        probe.finish(totalBytes: data.count)
         return nil
     }
 
@@ -457,13 +371,15 @@ final class CoreStorage: @unchecked Sendable {
         $storedDownloadItemResults[path] = nil
         $storedItemExistsResults[path] = nil
 
-        do {
-            try await firebaseStorage.child(path).delete()
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
+        try await HealthEvidence.measure { () async throws(Exception) in
+            do {
+                try await firebaseStorage.child(path).delete()
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
 
         return nil
@@ -697,25 +613,18 @@ final class CoreStorage: @unchecked Sendable {
         to localPath: URL,
         onProgress: (@Sendable (StorageTransferProgress) -> Void)? = nil
     ) async throws(Exception) {
-        let probe = TransferProgressProbe()
-        do {
+        try await TransferProgressProbe.measure(
+            totalBytes: try? fileManager.attributesOfItem(
+                atPath: localPath.path()
+            )[.size] as? Int,
+            onProgress: onProgress
+        ) { onProgress async throws(Exception) in
             try await writeFileObservingProgress(
                 at: path,
                 to: localPath,
-                onProgress: { progress in
-                    probe.handleProgress(progress)
-                    onProgress?(progress)
-                }
+                onProgress: onProgress
             )
-        } catch {
-            probe.invalidate()
-            throw error
         }
-
-        let fileSize = try? fileManager.attributesOfItem(
-            atPath: localPath.path()
-        )[.size] as? Int
-        probe.finish(totalBytes: fileSize)
     }
 
     // MARK: - Enumeration
@@ -736,19 +645,19 @@ final class CoreStorage: @unchecked Sendable {
         at path: String,
         firstResultOnly: Bool = false
     ) async throws(Exception) -> DirectoryListing {
-        let listResult: StorageListResult!
-
-        do {
-            listResult = if firstResultOnly {
-                try await firebaseStorage.child(path).list(maxResults: 1)
-            } else {
-                try await firebaseStorage.child(path).listAll()
+        let listResult = try await HealthEvidence.measure { () async throws(Exception) -> StorageListResult in
+            do {
+                return if firstResultOnly {
+                    try await firebaseStorage.child(path).list(maxResults: 1)
+                } else {
+                    try await firebaseStorage.child(path).listAll()
+                }
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
             }
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
         }
 
         let directoryListing = DirectoryListing(listResult)
@@ -1021,13 +930,15 @@ final class CoreStorage: @unchecked Sendable {
     private func getFileMetadata(
         at path: String
     ) async throws(Exception) -> StorageMetadata {
-        do {
-            return try await firebaseStorage.child(path).getMetadata()
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
+        try await HealthEvidence.measure { () async throws(Exception) -> StorageMetadata in
+            do {
+                return try await firebaseStorage.child(path).getMetadata()
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
     }
 
@@ -1070,14 +981,6 @@ final class CoreStorage: @unchecked Sendable {
         )
 
         return true
-    }
-
-    private static func resolvedStrategy(_ strategy: CacheStrategy) -> CacheStrategy {
-        guard strategy == .adaptive else { return strategy }
-        return NetworkHealthResolver.resolve(
-            health: Networking.config.healthDelegate.health,
-            configuration: Networking.config.networkHealthConfiguration
-        )
     }
 
     private func storedItemExistsResultIsValid(

@@ -27,6 +27,11 @@ import AppSubsystem
 ///     at: "users/123"
 /// )
 ///
+/// // Read and decode a Serializable model.
+/// let user: User = try await database.getValue(
+///     at: "users/123"
+/// )
+///
 /// // Write a value.
 /// try await database.setValue(
 ///     "Jane",
@@ -367,6 +372,59 @@ public extension DatabaseDelegate {
             with: updates,
             prependingEnvironment: false
         )
+    }
+
+    /// Reads and decodes the ``Serializable`` value stored
+    /// at the specified path.
+    ///
+    /// Use this method to read a model in a single step.
+    /// The value's raw representation is fetched from the
+    /// database and decoded through the type's
+    /// ``Serializable/init(from:)``:
+    ///
+    /// ```swift
+    /// let document: Document = try await database.getValue(
+    ///     at: "documents/123"
+    /// )
+    /// ```
+    ///
+    /// The compiler resolves `T` from the annotation at the
+    /// call site, so the stored representation is validated
+    /// against the type's ``Serializable/Representation``
+    /// before decoding begins.
+    ///
+    /// - Parameters:
+    ///   - path: The database path to read from.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path. The default is `true`.
+    ///   - cacheStrategy: The caching behavior for this
+    ///     operation. The default is
+    ///     ``CacheStrategy/returnCacheFirst``.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Returns: The decoded value stored at the path, as
+    ///   type `T`.
+    ///
+    /// - Throws: An ``Exception`` if the read fails, the
+    ///   stored value does not match the type's
+    ///   representation, or decoding fails.
+    func getValue<T: Serializable>(
+        at path: String,
+        prependingEnvironment: Bool = true,
+        cacheStrategy: CacheStrategy = .returnCacheFirst,
+        timeout duration: Duration = Networking.defaultOperationTimeout
+    ) async throws(Exception) -> T {
+        let representation: T.Representation = try await getValues(
+            at: path,
+            prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+
+        return try await T(from: representation)
     }
 
     /// Reads the value stored at the specified path as the

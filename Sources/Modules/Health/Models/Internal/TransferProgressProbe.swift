@@ -106,12 +106,7 @@ struct TransferProgressProbe {
         }
 
         watchdogTask?.cancel()
-
-        guard let sample else { return }
-        Networking.config.healthDelegate.recordThroughputSample(
-            bytes: sample.bytes,
-            seconds: sample.seconds
-        )
+        record(sample)
     }
 
     /// Incorporates a progress snapshot, recording a throughput
@@ -147,11 +142,7 @@ struct TransferProgressProbe {
             return sample
         }
 
-        guard let sample else { return }
-        Networking.config.healthDelegate.recordThroughputSample(
-            bytes: sample.bytes,
-            seconds: sample.seconds
-        )
+        record(sample)
     }
 
     /// Marks the transfer as failed or abandoned, cancelling
@@ -167,6 +158,46 @@ struct TransferProgressProbe {
         }
 
         watchdogTask?.cancel()
+    }
+
+    /// Runs a transfer with an attached probe, composing the
+    /// probe's progress sink with the caller's, finishing the
+    /// probe on success and invalidating it on failure.
+    ///
+    /// The `totalBytes` expression is evaluated only after the
+    /// transfer succeeds, so it may reference artifacts the
+    /// transfer produces – such as a downloaded file on disk.
+    ///
+    /// - Parameters:
+    ///   - totalBytes: The total number of bytes transferred,
+    ///     or `nil` when unknown.
+    ///   - onProgress: The caller's progress sink, invoked
+    ///     alongside the probe's for each snapshot.
+    ///   - transfer: The transfer to run, given the composed
+    ///     progress sink.
+    ///
+    /// - Throws: The transfer's `Exception`, after
+    ///   invalidating the probe.
+    static func measure(
+        totalBytes: @autoclosure () -> Int?,
+        onProgress: (@Sendable (StorageTransferProgress) -> Void)?,
+        _ transfer: (
+            _ onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+        ) async throws(Exception) -> Void
+    ) async throws(Exception) {
+        let probe = TransferProgressProbe()
+
+        do {
+            try await transfer { progress in
+                probe.handleProgress(progress)
+                onProgress?(progress)
+            }
+        } catch {
+            probe.invalidate()
+            throw error
+        }
+
+        probe.finish(totalBytes: totalBytes())
     }
 
     // MARK: - Auxiliary
@@ -196,5 +227,13 @@ struct TransferProgressProbe {
                 return
             }
         }
+    }
+
+    private func record(_ sample: (bytes: Int, seconds: TimeInterval)?) {
+        guard let sample else { return }
+        Networking.config.healthDelegate.recordThroughputSample(
+            bytes: sample.bytes,
+            seconds: sample.seconds
+        )
     }
 }

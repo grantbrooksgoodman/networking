@@ -65,7 +65,7 @@ struct NetworkActivityIndicator: View {
                     )
                 }
         }
-        .allowsHitTesting(viewModel.isVisible)
+        .allowsHitTesting(viewModel.allowsHitTesting)
         .buttonStyle(.plain)
         .offset(y: viewModel.yOffset)
         .opacity(viewModel.isVisible ? 1 : 0)

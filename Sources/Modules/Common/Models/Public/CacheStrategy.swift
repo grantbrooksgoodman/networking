@@ -53,4 +53,12 @@ public enum CacheStrategy: Sendable {
         case .returnCacheOnFailure: "returnCacheOnFailure"
         }
     }
+
+    var resolved: CacheStrategy {
+        guard self == .adaptive else { return self }
+        return NetworkHealthResolver.resolve(
+            health: Networking.config.healthDelegate.health,
+            configuration: Networking.config.networkHealthConfiguration
+        )
+    }
 }

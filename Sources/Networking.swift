@@ -106,8 +106,10 @@ public enum Networking {
     ///
     /// Call this method once at app launch. It configures
     /// Firebase App Check, initializes the Firebase
-    /// backend, registers Developer Mode actions, and
-    /// begins monitoring read/write enablement status.
+    /// backend, registers Developer Mode actions, starts
+    /// network health monitoring, and begins observing
+    /// read/write enablement status. Monitoring begins in
+    /// background tasks and does not block launch.
     ///
     /// App Check uses App Attest on physical devices and
     /// a debug provider in the simulator. The provider

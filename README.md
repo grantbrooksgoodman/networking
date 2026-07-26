@@ -18,14 +18,34 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
   - [Environment Management](#environment-management)
 - [Modules](#modules)
   - [Auth](#auth)
+    - [Anonymous Sign-In](#anonymous-sign-in)
+    - [Phone Verification](#phone-verification)
+    - [Sign-Out](#sign-out)
   - [Common](#common)
+    - [Models](#models)
+    - [Protocols](#protocols)
     - [Serializable](#serializable)
     - [RemotelyUpdatable](#remotelyupdatable)
     - [Macros](#macros)
+    - [Network Activity View Modifier](#network-activity-view-modifier)
   - [Database](#database)
+    - [Fan-Out Writes](#fan-out-writes)
+    - [Atomic Increment](#atomic-increment)
+    - [Transactions](#transactions)
+    - [Real-Time Observation](#real-time-observation)
+    - [Cache Strategy](#cache-strategy)
+    - [Core Database Store](#core-database-store)
+    - [Query Strategy](#query-strategy)
   - [Gemini](#gemini)
   - [Health](#health)
+    - [Reading Health](#reading-health)
+    - [Observing Changes](#observing-changes)
+    - [Configuration](#configuration)
+    - [Instrumentation](#instrumentation)
+    - [Active Probing (Opt-In)](#active-probing-opt-in)
   - [Storage](#storage)
+    - [Observing Transfer Progress](#observing-transfer-progress)
+    - [Supporting Types](#supporting-types)
   - [Translation](#translation)
 - [Performance](#performance)
   - [Connection Prewarming](#connection-prewarming)
@@ -124,6 +144,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching, network activity indicator toggling, and network health inspection.
 4. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
 5. Starts the network health monitor, which passively observes operation performance to estimate connection quality.
+
+Steps 4 and 5 begin in background tasks and do not block launch.
 
 > **Important:** `Networking.initialize()` must be called on the main actor. The `Networking.config` property is not available until initialization completes.
 
@@ -332,7 +354,15 @@ try await database.setValue(
 )
 ```
 
-And reconstruct it from stored data:
+And read it back in a single step with `getValue(at:)`, which fetches the raw representation and decodes it through the type's `init(from:)`:
+
+```swift
+let document: Document = try await database.getValue(
+    at: "documents/\(document.identifier)"
+)
+```
+
+The compiler resolves the type from the annotation at the call site, so the stored representation is validated against the type's `Representation` before decoding begins. To work with the raw representation directly – for example, to inspect fields without constructing a model – use `getValues(at:)` and decode manually:
 
 ```swift
 let data: [String: Any] = try await database.getValues(
@@ -365,7 +395,31 @@ let updated = try await document.update {
 
 Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed key path with a new value, so the compiler rejects type mismatches at build time. The builder writes all changed fields in a single `updateChildValues` call and supports conditional assignments using `if` and `if`/`else`.
 
-> **Note:** The builder-based `update(_:)` does not invoke the `willWrite` or `didWrite` lifecycle hooks. Only the single-property `update(_:to:)` method calls these hooks.
+When the new value depends on the value currently stored on the server – incrementing a counter, or merging an entry into a collection that multiple clients modify – use `update(_:applying:)` to apply the change atomically inside a database transaction:
+
+```swift
+let updated = try await document.update(
+    \.revision,
+    applying: { ($0 ?? 0) + 1 }
+)
+```
+
+The transform receives the value currently stored on the server – or `nil` if no value exists – and returns the value to commit. If another client changes the value before the commit completes, the transaction retries with the latest value until it succeeds. Because the transform may run more than once, it must be free of side effects, and it must not remove the value at the path – return a sentinel value instead.
+
+For properties whose values encode through `Serializable`, use `update(_:applyingRaw:)`. Because `init(from:)` is asynchronous, the transform operates on raw representations rather than decoded values; after the transaction commits, the committed value is decoded into the property's type to produce the updated instance:
+
+```swift
+let updated = try await document.update(
+    \.annotations,
+    applyingRaw: { currentValue in
+        var annotations = (currentValue as? [[String: Any]]) ?? []
+        annotations.append(newAnnotation.encoded)
+        return annotations
+    }
+)
+```
+
+> **Note:** Only the single-property `update(_:to:)` method performs the full write lifecycle. The builder-based `update(_:)` does not invoke either lifecycle hook, and the transform-based `update(_:applying:)` and `update(_:applyingRaw:)` methods skip `willWrite` – only `didWrite` is called, with the committed result.
 
 **Conformance Requirements**
 
@@ -376,7 +430,7 @@ Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed
 | `identifier` | The identifier string used to construct the full database key path. |
 | `networkPath` | The base path for records of this type (for example, `"documents"`). The default lowercases the type name and appends `"s"`. |
 | `modifyKey(_:withValue:)` | Returns a modified in-memory copy with the specified key set to the new value, or `nil` on type mismatch. |
-| `serializableKey(for:)` | Maps a key path to its serialization key. Required for `update(_:to:)`. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
+| `serializableKey(for:)` | Maps a key path to its serialization key. Required for key-path-based updates. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
 
 The `SerializableKey` associated type is inferred from the signatures of your protocol requirement implementations – typically `modifyKey(_:withValue:)`. It must be `Hashable` and `RawRepresentable<String>`.
 
@@ -532,6 +586,48 @@ let messages: [String: Any] = try await database.queryValues(
 Specify the expected return type using a variable annotation so the compiler can determine `T`.
 
 > **Important:** The type cast is performed at runtime. If the value stored at the path does not match the inferred type, the method throws a typecast exception. Ensure that the expected type matches the shape of your stored data.
+
+#### Fan-Out Writes
+
+Use `commit(_:)` to write a set of values across multiple database paths in a single atomic operation. Each key in the dictionary is a slash-separated path relative to the active environment, and either every path is updated or none are:
+
+```swift
+try await database.commit([
+    "users/123/name": "Jane",
+    "conversations/abc/hash": updatedHash,
+])
+```
+
+Pass `NSNull()` as a value to delete the entry at a path. The method throws if the dictionary contains overlapping paths – that is, if one path is a prefix of another.
+
+#### Atomic Increment
+
+Use `increment(at:by:)` to add a delta to a numeric value stored at a path:
+
+```swift
+try await database.increment(
+    at: "users/123/badgeNumber",
+    by: 1
+)
+```
+
+The increment is performed entirely on the server in a single atomic operation. No local read is required, so concurrent increments from multiple clients never conflict.
+
+#### Transactions
+
+Use `runTransaction(at:_:)` when a new value must be derived from the value currently stored at a path. The block receives the current value – or `nil` if no value exists – and returns the value to commit. If another client changes the value between the read and the commit, the transaction retries automatically with the latest value until it succeeds:
+
+```swift
+let committed = try await database.runTransaction(
+    at: "users/123/badgeNumber"
+) { currentValue in
+    max(0, ((currentValue as? Int) ?? 0) - 1)
+}
+```
+
+The method returns the committed value, or `nil` if the transaction committed a deletion. Because the block may run more than once, it must be free of side effects. Transactions bypass [operation coalescing](#operation-coalescing) – concurrent transactions are always executed independently.
+
+For simple additions, prefer `increment(at:by:)` – it requires no retry loop. For derived updates to properties of a `RemotelyUpdatable` model, prefer [`update(_:applying:)` or `update(_:applyingRaw:)`](#remotelyupdatable), which build on `runTransaction` and return the updated instance.
 
 #### Real-Time Observation
 
