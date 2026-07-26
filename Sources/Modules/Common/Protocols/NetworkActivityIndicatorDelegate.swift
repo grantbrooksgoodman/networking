@@ -37,6 +37,14 @@ public protocol NetworkActivityIndicatorDelegate {
     @MainActor
     var progressViewTintColor: Color? { get }
 
+    /// The action to perform when the indicator is tapped.
+    ///
+    /// Return `nil` to use the default behavior, which
+    /// presents an alert summarizing the current network
+    /// health.
+    @MainActor
+    var tapAction: (() -> Void)? { get }
+
     // MARK: - Methods
 
     /// Shows the network activity indicator.
@@ -58,9 +66,19 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
 
     // MARK: - Computed Properties
 
-    /// The background color of the indicator.
+    /// The background color of the indicator. The default
+    /// reflects the current network health tier: green for
+    /// good, orange for fair, red for poor, and `nil`
+    /// (transparent) when health is unknown.
     @MainActor
-    public var backgroundColor: Color? { nil }
+    public var backgroundColor: Color? {
+        switch Networking.config.healthDelegate.health.tier {
+        case .fair: .orange
+        case .good: .green
+        case .poor: .red
+        case nil: nil
+        }
+    }
 
     // MARK: - Init
 
@@ -82,5 +100,27 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
         Task { @MainActor in
             Observables.isNetworkActivityOccurring.value = false
         }
+    }
+}
+
+public extension NetworkActivityIndicatorDelegate {
+    /// The background color of the indicator.
+    ///
+    /// This default implementation returns `nil`, which
+    /// causes the indicator's background color to adopt
+    /// a system blue color.
+    @MainActor
+    var backgroundColor: Color? {
+        nil
+    }
+
+    /// The action to perform when the indicator is tapped.
+    ///
+    /// This default implementation returns `nil`, which
+    /// causes the indicator to present an alert summarizing
+    /// the current network health.
+    @MainActor
+    var tapAction: (() -> Void)? {
+        nil
     }
 }

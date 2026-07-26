@@ -18,17 +18,39 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
   - [Environment Management](#environment-management)
 - [Modules](#modules)
   - [Auth](#auth)
+    - [Anonymous Sign-In](#anonymous-sign-in)
+    - [Phone Verification](#phone-verification)
+    - [Sign-Out](#sign-out)
   - [Common](#common)
+    - [Models](#models)
+    - [Protocols](#protocols)
     - [Serializable](#serializable)
     - [RemotelyUpdatable](#remotelyupdatable)
     - [Macros](#macros)
+    - [Network Activity View Modifier](#network-activity-view-modifier)
   - [Database](#database)
+    - [Fan-Out Writes](#fan-out-writes)
+    - [Atomic Increment](#atomic-increment)
+    - [Transactions](#transactions)
+    - [Real-Time Observation](#real-time-observation)
+    - [Cache Strategy](#cache-strategy)
+    - [Core Database Store](#core-database-store)
+    - [Query Strategy](#query-strategy)
   - [Gemini](#gemini)
+  - [Health](#health)
+    - [Reading Health](#reading-health)
+    - [Observing Changes](#observing-changes)
+    - [Configuration](#configuration)
+    - [Instrumentation](#instrumentation)
+    - [Active Probing (Opt-In)](#active-probing-opt-in)
   - [Storage](#storage)
+    - [Observing Transfer Progress](#observing-transfer-progress)
+    - [Supporting Types](#supporting-types)
   - [Translation](#translation)
 - [Performance](#performance)
   - [Connection Prewarming](#connection-prewarming)
   - [Operation Coalescing](#operation-coalescing)
+  - [Adaptive Caching](#adaptive-caching)
 - [Delegate Customization](#delegate-customization)
 - [Dependencies](#dependencies)
 
@@ -40,7 +62,7 @@ Networking builds on the foundation provided by [AppSubsystem](https://github.co
 
 **Your app must initialize AppSubsystem before using Networking.** The two frameworks share a single dependency graph, a single persistence layer, and a single set of developer tools. Networking registers its services, cache domains, logger domains, and Developer Mode actions directly into the infrastructure that AppSubsystem provides. As a result, Networking is _not a standalone framework_ – it requires a [fully configured AppSubsystem environment](https://github.com/grantbrooksgoodman/app-subsystem#installation) to function.
 
-Networking is organized around six modules, each focused on a specific backend service:
+Networking is organized around seven modules, each focused on a specific backend service:
 
 - **Auth.** User authentication with anonymous sign-in and phone number verification, backed by Firebase Authentication.
 
@@ -49,6 +71,8 @@ Networking is organized around six modules, each focused on a specific backend s
 - **Database.** Key-path-based reading, writing, querying, and real-time observation of structured data, backed by Firebase Realtime Database. Operations support configurable caching, timeouts, and environment-scoped paths.
 
 - **Gemini.** AI-enhanced translation powered by the Gemini API, with configurable models, token limits, and contextual prompts.
+
+- **Health.** Passive network quality estimation based on observed database and storage operations. Produces a continuous health score and tier classification without active probing.
 
 - **Storage.** File upload, download, deletion, and directory listing for cloud-hosted assets, backed by Firebase Cloud Storage.
 
@@ -84,7 +108,7 @@ Networking relies on AppSubsystem for its core infrastructure. The table below s
 |---|---|
 | Dependency injection (`@Dependency`) | Exposes all networking services through the shared dependency graph. Your code accesses services using `@Dependency(\.networking)`. |
 | Persistence (`@Persistent`) | Persists the active network environment and indicator state across launches using strongly typed storage keys. |
-| Reactive observation (`Observable`) | Publishes network activity state for cross-feature observation. |
+| Reactive observation (`Observable`) | Publishes network activity and network health state for cross-feature observation. |
 | Logging (`Logger`, `LoggerDomain`) | Logs operations across database, storage, and translation modules using scoped logger domains. |
 | Caching (`CacheDomain`) | Registers networking-specific cache domains that integrate with the system-wide cache clearing provided by AppSubsystem. |
 | Developer tools (`DevModeService`) | Registers Developer Mode actions for switching environments and toggling the network activity indicator in pre-release builds. |
@@ -113,12 +137,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 ```
 
-`Networking.initialize()` performs four operations:
+`Networking.initialize()` performs five operations:
 
 1. Configures Firebase App Check, using App Attest on physical devices and a debug provider in the simulator.
 2. Configures the Firebase backend by calling `FirebaseApp.configure()`.
-3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching and network activity indicator toggling.
+3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching, network activity indicator toggling, and network health inspection.
 4. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
+5. Starts the network health monitor, which passively observes operation performance to estimate connection quality.
+
+Steps 4 and 5 begin in background tasks and do not block launch.
 
 > **Important:** `Networking.initialize()` must be called on the main actor. The `Networking.config` property is not available until initialization completes.
 
@@ -134,7 +161,7 @@ let values: [String: Any] = try await networking.database.getValues(
 )
 ```
 
-Each property on [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift) returns the currently registered delegate for that service – [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift), [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift), [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift), or [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift).
+Each property on [`NetworkServices`](Sources/Modules/Common/Models/Public/NetworkServices.swift) returns the currently registered delegate for that service – [`AuthDelegate`](Sources/Modules/Auth/Protocols/AuthDelegate.swift), [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift), [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift), [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift), or [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift).
 
 ### Environment Management
 
@@ -327,7 +354,15 @@ try await database.setValue(
 )
 ```
 
-And reconstruct it from stored data:
+And read it back in a single step with `getValue(at:)`, which fetches the raw representation and decodes it through the type's `init(from:)`:
+
+```swift
+let document: Document = try await database.getValue(
+    at: "documents/\(document.identifier)"
+)
+```
+
+The compiler resolves the type from the annotation at the call site, so the stored representation is validated against the type's `Representation` before decoding begins. To work with the raw representation directly – for example, to inspect fields without constructing a model – use `getValues(at:)` and decode manually:
 
 ```swift
 let data: [String: Any] = try await database.getValues(
@@ -360,7 +395,31 @@ let updated = try await document.update {
 
 Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed key path with a new value, so the compiler rejects type mismatches at build time. The builder writes all changed fields in a single `updateChildValues` call and supports conditional assignments using `if` and `if`/`else`.
 
-> **Note:** The builder-based `update(_:)` does not invoke the `willWrite` or `didWrite` lifecycle hooks. Only the single-property `update(_:to:)` method calls these hooks.
+When the new value depends on the value currently stored on the server – incrementing a counter, or merging an entry into a collection that multiple clients modify – use `update(_:applying:)` to apply the change atomically inside a database transaction:
+
+```swift
+let updated = try await document.update(
+    \.revision,
+    applying: { ($0 ?? 0) + 1 }
+)
+```
+
+The transform receives the value currently stored on the server – or `nil` if no value exists – and returns the value to commit. If another client changes the value before the commit completes, the transaction retries with the latest value until it succeeds. Because the transform may run more than once, it must be free of side effects, and it must not remove the value at the path – return a sentinel value instead.
+
+For properties whose values encode through `Serializable`, use `update(_:applyingRaw:)`. Because `init(from:)` is asynchronous, the transform operates on raw representations rather than decoded values; after the transaction commits, the committed value is decoded into the property's type to produce the updated instance:
+
+```swift
+let updated = try await document.update(
+    \.annotations,
+    applyingRaw: { currentValue in
+        var annotations = (currentValue as? [[String: Any]]) ?? []
+        annotations.append(newAnnotation.encoded)
+        return annotations
+    }
+)
+```
+
+> **Note:** Only the single-property `update(_:to:)` method performs the full write lifecycle. The builder-based `update(_:)` does not invoke either lifecycle hook, and the transform-based `update(_:applying:)` and `update(_:applyingRaw:)` methods skip `willWrite` – only `didWrite` is called, with the committed result.
 
 **Conformance Requirements**
 
@@ -371,7 +430,7 @@ Each [`Assign`](Sources/Modules/Common/Models/Public/Assign.swift) pairs a typed
 | `identifier` | The identifier string used to construct the full database key path. |
 | `networkPath` | The base path for records of this type (for example, `"documents"`). The default lowercases the type name and appends `"s"`. |
 | `modifyKey(_:withValue:)` | Returns a modified in-memory copy with the specified key set to the new value, or `nil` on type mismatch. |
-| `serializableKey(for:)` | Maps a key path to its serialization key. Required for `update(_:to:)`. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
+| `serializableKey(for:)` | Maps a key path to its serialization key. Required for key-path-based updates. The default returns `nil`; `@RemotelyUpdatable` generates this automatically. |
 
 The `SerializableKey` associated type is inferred from the signatures of your protocol requirement implementations – typically `modifyKey(_:withValue:)`. It must be `Hashable` and `RawRepresentable<String>`.
 
@@ -528,6 +587,48 @@ Specify the expected return type using a variable annotation so the compiler can
 
 > **Important:** The type cast is performed at runtime. If the value stored at the path does not match the inferred type, the method throws a typecast exception. Ensure that the expected type matches the shape of your stored data.
 
+#### Fan-Out Writes
+
+Use `commit(_:)` to write a set of values across multiple database paths in a single atomic operation. Each key in the dictionary is a slash-separated path relative to the active environment, and either every path is updated or none are:
+
+```swift
+try await database.commit([
+    "users/123/name": "Jane",
+    "conversations/abc/hash": updatedHash,
+])
+```
+
+Pass `NSNull()` as a value to delete the entry at a path. The method throws if the dictionary contains overlapping paths – that is, if one path is a prefix of another.
+
+#### Atomic Increment
+
+Use `increment(at:by:)` to add a delta to a numeric value stored at a path:
+
+```swift
+try await database.increment(
+    at: "users/123/badgeNumber",
+    by: 1
+)
+```
+
+The increment is performed entirely on the server in a single atomic operation. No local read is required, so concurrent increments from multiple clients never conflict.
+
+#### Transactions
+
+Use `runTransaction(at:_:)` when a new value must be derived from the value currently stored at a path. The block receives the current value – or `nil` if no value exists – and returns the value to commit. If another client changes the value between the read and the commit, the transaction retries automatically with the latest value until it succeeds:
+
+```swift
+let committed = try await database.runTransaction(
+    at: "users/123/badgeNumber"
+) { currentValue in
+    max(0, ((currentValue as? Int) ?? 0) - 1)
+}
+```
+
+The method returns the committed value, or `nil` if the transaction committed a deletion. Because the block may run more than once, it must be free of side effects. Transactions bypass [operation coalescing](#operation-coalescing) – concurrent transactions are always executed independently.
+
+For simple additions, prefer `increment(at:by:)` – it requires no retry loop. For derived updates to properties of a `RemotelyUpdatable` model, prefer [`update(_:applying:)` or `update(_:applyingRaw:)`](#remotelyupdatable), which build on `runTransaction` and return the updated instance.
+
 #### Real-Time Observation
 
 Use `observe(path:)` to receive a stream of values as they change at a given path. The method returns an `AsyncThrowingStream` that emits the current value immediately and again each time it changes on the server:
@@ -542,7 +643,7 @@ let task = Task {
 }
 ```
 
-The observer is automatically removed when the consuming task is cancelled or the iteration ends — no manual cleanup is required. To stop observing, cancel the task:
+The observer is automatically removed when the consuming task is cancelled or the iteration ends – no manual cleanup is required. To stop observing, cancel the task:
 
 ```swift
 task.cancel()
@@ -556,6 +657,7 @@ Database read operations accept an optional [`CacheStrategy`](Sources/Modules/Co
 
 | Case | Behavior |
 |---|---|
+| `.adaptive` | Resolves to a concrete cache strategy at runtime based on the current network health score. See [Adaptive Caching](#adaptive-caching). |
 | `.returnCacheFirst` | Returns cached data immediately when available, without making a network request. |
 | `.returnCacheOnFailure` | Fetches from the network first, and falls back to cached data only if the request fails. |
 | `.disregardCache` | Ignores any cached data and always fetches from the network. |
@@ -592,6 +694,140 @@ let translation = try await hostedTranslation.translate(
 
 The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum defines the available models for enhancement. The default is `flash25`.
 
+### Health
+
+The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs. The only exception is strictly opt-in active probing, described below.
+
+> **Note:** Health monitoring starts automatically when you call `Networking.initialize()`. No additional setup is required.
+
+#### Reading Health
+
+Access the current health value synchronously through the delegate:
+
+```swift
+@Dependency(\.networking.health) var health: NetworkHealthDelegate
+
+let currentHealth = health.health
+```
+
+[`NetworkHealth`](Sources/Modules/Health/Models/Public/NetworkHealth.swift) is either `.measured(score:tier:)` or `.unknown`. A measured health carries a continuous score in the range [0.0, 1.0] and a discrete [`NetworkHealthTier`](Sources/Modules/Health/Models/Public/NetworkHealth.swift) of `.good`, `.fair`, or `.poor`. Health is `.unknown` until enough operations have been observed to produce a reliable estimate.
+
+#### Observing Changes
+
+For views that need to react to health changes, include `Observables.networkHealth` in your observer's `observedValues` and handle updates in `onChange(of:)`, following the standard AppSubsystem `Observer` pattern:
+
+```swift
+struct MyObserver: Observer {
+    typealias R = MyReducer
+
+    let observedValues: [any ObservableProtocol] = [Observables.networkHealth]
+    let viewModel: ViewModel<MyReducer>
+
+    func onChange(of observable: Observable<Any>) {
+        switch observable {
+        case Observables.networkHealth:
+            guard let health = observable.value as? NetworkHealth else { return }
+            send(.networkHealthChanged(health))
+        default: ()
+        }
+    }
+}
+```
+
+When you only need the current value – for example, to make a branching decision in a service – read it directly from the delegate without setting up an observer.
+
+#### Configuration
+
+Scoring parameters – including tier thresholds, channel weights, penalty weights for failure rate and jitter, and the half-life of the exponentially weighted moving average – can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift):
+
+```swift
+var configuration = NetworkHealthConfiguration()
+configuration.goodTierThreshold = 0.8
+Networking.config.setNetworkHealthConfiguration(configuration)
+```
+
+The default configuration is suitable for most apps. Adjust individual parameters only when you have specific requirements for sensitivity or scoring behavior.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `adaptiveScoreThreshold` | `0.3` | Score below which `.adaptive` caching resolves to `.returnCacheFirst`. |
+| `channelWeightLatency` | `0.6` | Relative weight of the latency channel in the blended score. |
+| `channelWeightThroughput` | `0.4` | Relative weight of the throughput channel in the blended score. |
+| `constrainedPenalty` | `0.9` | Multiplicative penalty on constrained paths. |
+| `expensivePenalty` | `0.95` | Multiplicative penalty on expensive paths. |
+| `failureRatePenaltyWeight` | `0.5` | Weight of the failure-rate penalty; `0` disables it. |
+| `fairTierThreshold` | `0.3` | Score at or above which health is `.fair`. |
+| `flapForegroundGraceSeconds` | `10` | Post-foregrounding window during which socket drops are not flaps. |
+| `goodTierThreshold` | `0.7` | Score at or above which health is `.good`. |
+| `halfLife` | `30` | Half-life, in seconds, of the sample decay. |
+| `intermediateRadioScoreCap` | `0.75` | Maximum score on 3G-class cellular technologies. |
+| `isConnectionStabilityMonitoringEnabled` | `true` | Whether realtime connection stability is monitored. |
+| `isRadioTechnologyPriorEnabled` | `true` | Whether radio technology caps the score on cellular paths. |
+| `isURLSessionMetricsEnabled` | `true` | Whether the framework's own HTTPS requests contribute evidence. |
+| `jitterPenaltyWeight` | `0.3` | Weight of the per-channel jitter reduction; `0` disables it. |
+| `latencyCeiling` | `3` | Latency, in seconds, mapping to a score of approximately zero. |
+| `latencyFloor` | `0.1` | Latency, in seconds, mapping to a score of approximately one. |
+| `latencyJitterCeiling` | `1.0` | Latency coefficient of variation at which the jitter reduction saturates. |
+| `legacyRadioScoreCap` | `0.4` | Maximum score on 2G-class cellular technologies. |
+| `minimumConfidence` | `0.5` | Aggregate confidence required to report a measured value. |
+| `minimumThroughputSampleBytes` | `51200` | Minimum transfer size recorded as a throughput sample. |
+| `probeConfiguration` | `nil` | Opt-in active probing configuration; `nil` disables probing. |
+| `stabilityFlapCeiling` | `3` | Decayed flap count at which the stability penalty saturates. |
+| `stabilityPenaltyWeight` | `0.4` | Weight of the connection-stability penalty; `0` disables it. |
+| `throughputCeiling` | `22.0` | log₂(bytes per second) mapping to a score of approximately one. |
+| `throughputFloor` | `13.0` | log₂(bytes per second) mapping to a score of approximately zero. |
+| `throughputJitterCeiling` | `2.0` | Throughput standard deviation at which the jitter reduction saturates. |
+| `transferStallCheckInterval` | `2` | Interval, in seconds, between stall checks on active transfers. |
+| `transferStallSeconds` | `8` | Progress-free duration after which a transfer is considered stalled. |
+
+#### Instrumentation
+
+Health estimation is built into the default Firebase-backed database and storage implementations, and draws on three kinds of input.
+
+**Measurements** – direct observations that feed the latency and throughput channels:
+
+- *Latency* – round-trip times of database operations. Timeouts contribute censored samples bounded by the timeout duration – the strongest single piece of negative evidence.
+- *Throughput* – storage transfer speeds. Large transfers are sampled continuously while in flight: each segment of transferred bytes that reaches the minimum sample size contributes its own sample, so the estimate learns about a long transfer as it happens rather than only at completion.
+- *Handshake* – DNS-plus-connect timing of fresh connections from the framework's own HTTPS requests (Gemini enhancement). Total request duration is never recorded – inference time would poison the estimate. Traffic from the external Translator package is out of scope.
+- *Probe round-trips* – when active probing is enabled (see below).
+
+**Derived statistics** – penalties computed from the sample history:
+
+- *Jitter* – high dispersion in a channel's samples reduces that channel's contribution. An unstable connection scores lower than a steady one with the same averages.
+- *Failure rate* – database operation timeouts, transfer stalls, and network-level request failures contribute failure evidence that penalizes the score while recent. A transfer whose progress freezes for `transferStallSeconds` contributes a stall before its timeout fires.
+- *Stability* – unexpected realtime socket drops in the foreground (flaps) penalize the score while recent. Drops that coincide with going offline, backgrounding, or the grace period after foregrounding are ignored.
+
+**Priors and policies** – bounds that shape the score without ever creating or raising evidence:
+
+- *Path penalties* – constrained and expensive paths apply multiplicative penalties.
+- *Radio access technology caps* – on cellular paths, 2G-class technologies cap the reportable score at `legacyRadioScoreCap` and 3G-class technologies at `intermediateRadioScoreCap`. Modern and unrecognized technologies have no effect; measurements always speak first.
+- *Offline hard zero* – while the device is offline, health reports a score of `0` immediately.
+
+Cache hits, coalesced operations, and offline failures are automatically excluded from all channels.
+
+Because an attached connection-state observer keeps the realtime connection alive, stability monitoring attaches lazily – only after the first database operation produces a latency sample – so apps that use only storage or authentication never open a realtime connection.
+
+Two passive signals can be disabled independently: set `isConnectionStabilityMonitoringEnabled` to `false` to stop observing the realtime client's connection state, or `isURLSessionMetricsEnabled` to `false` to feed the estimator exclusively from Firebase traffic.
+
+Beyond continuous samples, the delegate accepts discrete [`NetworkHealthEvent`](Sources/Modules/Health/Models/Public/NetworkHealthEvent.swift) values – one-shot signals such as connection flaps, handshake timings, transfer stalls, and probe failures – through its `record(_:)` method. The built-in delegate folds events into the health estimate. Custom conformances receive a do-nothing default implementation, and only implement `record(_:)` to incorporate event evidence. The event type may gain new cases in future versions, so switch statements over it should include a `default` clause.
+
+> **Note:** Only the built-in Firebase implementations are instrumented. Custom delegates registered through `Networking.config` are not observed by the health system.
+
+#### Active Probing (Opt-In)
+
+By default the health system generates no traffic of its own. Supplying a [`NetworkHealthProbeConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthProbeConfiguration.swift) reverses that contract explicitly: when the health is read while `.unknown` – or after a network interface transition – the system may send a single rate-limited `HEAD` request to an endpoint you control, filling the idle-confidence gap:
+
+```swift
+var configuration = NetworkHealthConfiguration()
+configuration.probeConfiguration = .init(
+    url: URL(string: "https://api.example.com/health")!
+)
+
+Networking.config.setNetworkHealthConfiguration(configuration)
+```
+
+Probes never fire on a timer and never fire while health is measured. They are suppressed in the background, in Low Power Mode, on constrained or expensive paths (unless explicitly allowed), within `minimumIntervalSeconds` of the previous attempt, and beyond the hard `maximumProbesPerHour` budget. A successful probe contributes its round-trip latency; a network-level failure contributes failure evidence bounded by the probe timeout. Every attempt and outcome is logged to the `health` logger domain.
+
 ### Storage
 
 The [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) protocol provides file-level access to hosted cloud storage. Upload, download, delete, and inspect files and directories. All operations use typed throws – they return their result directly (when applicable) and throw an `Exception` on failure:
@@ -617,6 +853,23 @@ let directoryListing = try await storage.getDirectoryListing(
 )
 ```
 
+#### Observing Transfer Progress
+
+Use the progress-reporting variants of `upload` and `downloadItem` to drive UI such as progress bars. Each returns an `AsyncThrowingStream` of [`StorageTransferProgress`](Sources/Modules/Storage/Models/Public/StorageTransferProgress.swift) snapshots that yields as the transfer advances, finishes when it completes, and throws an `Exception` on failure:
+
+```swift
+for try await progress in storage.uploadWithProgress(
+    videoData,
+    metadata: HostedItemMetadata("videos/intro.mp4")
+) {
+    progressView.progress = Float(progress.fractionCompleted)
+}
+```
+
+Cancelling the task that iterates the stream cancels the transfer. A download satisfied by cache finishes immediately with no progress events. Custom `StorageDelegate` conformances that do not implement the progress-reporting requirements fall back to a progress-silent default – the operation still completes, but no snapshots are yielded.
+
+Progress-reporting operations are never coalesced with identical concurrent operations (see [Operation Coalescing](#operation-coalescing)).
+
 #### Supporting Types
 
 | Type | Purpose |
@@ -624,6 +877,7 @@ let directoryListing = try await storage.getDirectoryListing(
 | [`DirectoryListing`](Sources/Modules/Storage/Models/Public/DirectoryListing.swift) | A snapshot of file paths and subdirectory names at a given storage path. |
 | [`HostedItemMetadata`](Sources/Modules/Storage/Models/Public/HostedItemMetadata.swift) | Metadata for a file upload, including the destination path and optional HTTP headers. |
 | [`HostedItemType`](Sources/Modules/Storage/Models/Public/HostedItemType.swift) | Identifies whether a storage item is a file or a directory. |
+| [`StorageTransferProgress`](Sources/Modules/Storage/Models/Public/StorageTransferProgress.swift) | A snapshot of a transfer's progress, yielded by the progress-reporting operations. |
 
 ### Translation
 
@@ -665,6 +919,21 @@ The default database and storage implementations automatically coalesce identica
 
 This deduplication is transparent and requires no additional configuration.
 
+Progress-reporting operations (`uploadWithProgress` and `downloadItemWithProgress`) are the exception – they are never coalesced. Coalescing delivers a single shared result to all callers, which would leave all but one caller without progress events. Each progress-reporting call therefore performs its own transfer.
+
+### Adaptive Caching
+
+The `.adaptive` cache strategy ties caching behavior to the current network health score. When the score falls below the configured threshold, `.adaptive` resolves to `.returnCacheFirst`, serving cached data immediately to avoid slow network round-trips. When the score is at or above the threshold, it resolves to `.returnCacheOnFailure`, preferring fresh data while still falling back to the cache on failure:
+
+```swift
+let values: [String: Any] = try await database.getValues(
+    at: "users/123",
+    cacheStrategy: .adaptive
+)
+```
+
+The resolution threshold defaults to `0.3` and can be adjusted through [`NetworkHealthConfiguration`](Sources/Modules/Health/Models/Public/NetworkHealthConfiguration.swift). Resolution occurs at the point of operation dispatch, so two `.adaptive` operations dispatched at different times may resolve to different concrete strategies if the health score changes between them.
+
 ---
 
 ## Delegate Customization
@@ -677,6 +946,7 @@ Default behavior can be replaced by registering custom delegates on `Networking.
 | [`DatabaseDelegate`](Sources/Modules/Database/Protocols/DatabaseDelegate.swift) | Key-path-based data access. | Firebase Realtime Database. |
 | [`StorageDelegate`](Sources/Modules/Storage/Protocols/StorageDelegate.swift) | Cloud file operations. | Firebase Cloud Storage. |
 | [`GeminiAPIKeyDelegate`](Sources/Modules/Gemini/Protocols/GeminiAPIKeyDelegate.swift) | Gemini API key provider. | None (must be registered to use AI enhancement). |
+| [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) | Passive network quality estimation. | Built-in EWMA-based health estimator. |
 | [`HostedTranslationDelegate`](Sources/Modules/Translation/Protocols/HostedTranslationDelegate.swift) | String translation. | Built-in hosted translation service. |
 | [`NetworkActivityIndicatorDelegate`](Sources/Modules/Common/Protocols/NetworkActivityIndicatorDelegate.swift) | Activity indicator appearance. | Default activity indicator. |
 
@@ -685,6 +955,7 @@ Register delegates individually or in a single call:
 ```swift
 Networking.config.register(
     databaseDelegate: myDatabaseDelegate,
+    healthDelegate: myHealthDelegate,
     storageDelegate: myStorageDelegate
 )
 

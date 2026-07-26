@@ -159,8 +159,8 @@ struct Database: DatabaseDelegate {
         strategy: QueryStrategy,
         prependingEnvironment: Bool,
         cacheStrategy: CacheStrategy,
-        timeout duration: Duration // swiftformat:disable all
-    ) async throws(Exception) -> T { // swiftformat:enable all
+        timeout duration: Duration
+    ) async throws(Exception) -> T {
         guard let values = try await coreDatabase.performOperation(
             .queryValues(
                 atPath: path,

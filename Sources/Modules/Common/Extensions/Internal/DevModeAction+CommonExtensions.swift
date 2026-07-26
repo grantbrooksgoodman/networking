@@ -7,13 +7,129 @@
 
 /* Native */
 import Foundation
+import UIKit
 
 /* Proprietary */
 import AlertKit
 import AppSubsystem
 
 extension DevModeAction {
-    static var switchEnvironmentAction: DevModeAction {
+    static var inspectNetworkHealthAction: DevModeAction {
+        @Sendable
+        func inspectNetworkHealth() {
+            Task { @MainActor in
+                @Dependency(\.networking.health) var networkHealthService: NetworkHealthDelegate
+                guard let summary = await (
+                    networkHealthService as? NetworkHealthService
+                )?.debugSummary() else {
+                    return Logger.log(
+                        .init(
+                            "The registered NetworkHealthDelegate is incompatible.",
+                            isReportable: false,
+                            metadata: .init(sender: self)
+                        ),
+                        domain: .Networking.health,
+                        with: .toast
+                    )
+                }
+
+                let inspectionAlert = AKAlert(
+                    title: "Network Health",
+                    message: summary,
+                    actions: [.init(
+                        "OK",
+                        style: .preferred,
+                        effect: {}
+                    )]
+                )
+
+                let fontSize: CGFloat = UIApplication.isFullyV26Compatible ? 15 : 13
+                let labelFont: UIFont = .systemFont(
+                    ofSize: fontSize,
+                    weight: .semibold
+                )
+
+                var secondaryAttributes: [AlertKit.AttributedStringConfig.StringAttributes] = [
+                    .init(
+                        [.font: labelFont],
+                        stringRanges: [
+                            "Confidence:",
+                            "Failures:",
+                            "Flaps:",
+                            "Latency:",
+                            "Path:",
+                            "Probing:",
+                            "Score:",
+                            "Socket:",
+                            "Stalls:",
+                            "Throughput:",
+                            "Transfer:",
+                        ]
+                    ),
+                ]
+
+                if let tier = networkHealthService.health.tier {
+                    let tierColor: UIColor = switch tier {
+                    case .fair: .systemOrange
+                    case .good: .systemGreen
+                    case .poor: .systemRed
+                    }
+
+                    secondaryAttributes.append(.init(
+                        [
+                            .font: labelFont,
+                            .foregroundColor: tierColor,
+                        ],
+                        stringRanges: ["(\(tier.rawValue.capitalized))"]
+                    ))
+                }
+
+                inspectionAlert.setMessageAttributes(
+                    .init(
+                        [.font: UIFont.systemFont(ofSize: fontSize)],
+                        secondaryAttributes: secondaryAttributes
+                    )
+                )
+
+                await inspectionAlert.present(translating: [])
+            }
+        }
+
+        return DevModeAction(
+            title: "Inspect Network Health",
+            perform: inspectNetworkHealth
+        )
+    }
+
+    static var networkingOptionsAction: DevModeAction {
+        @Sendable
+        func networkingOptions() {
+            Task { @MainActor in
+                let actions: [AKAction] = [
+                    inspectNetworkHealthAction,
+                    switchEnvironmentAction,
+                    toggleNetworkActivityIndicatorAction,
+                ].map {
+                    AKAction(
+                        $0.title,
+                        effect: $0.perform
+                    )
+                }
+
+                await AKActionSheet(
+                    title: "Networking Options",
+                    actions: actions
+                ).present(translating: [])
+            }
+        }
+
+        return DevModeAction(
+            title: "Networking Options",
+            perform: networkingOptions
+        )
+    }
+
+    private static var switchEnvironmentAction: DevModeAction {
         @Sendable
         func switchEnvironment() {
             Task {
@@ -77,13 +193,13 @@ extension DevModeAction {
             }
         }
 
-        return .init(
+        return DevModeAction(
             title: "Switch Environment",
             perform: switchEnvironment
         )
     }
 
-    static var toggleNetworkActivityIndicatorAction: DevModeAction {
+    private static var toggleNetworkActivityIndicatorAction: DevModeAction {
         @Sendable
         func toggleNetworkActivityIndicator() {
             @Dependency(\.coreKit.hud) var coreHUD: CoreKit.HUD
@@ -99,7 +215,7 @@ extension DevModeAction {
             coreHUD.showSuccess(text: !value == true ? "ON" : "OFF")
         }
 
-        return .init(
+        return DevModeAction(
             title: "Toggle Network Activity Indicator",
             perform: toggleNetworkActivityIndicator
         )

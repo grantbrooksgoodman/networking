@@ -20,7 +20,9 @@ struct NetworkActivityIndicatorReducer: Reducer {
     // MARK: - Actions
 
     enum Action {
+        case backgroundColorChanged(Color?)
         case hideIndicator
+        case indicatorTapped
         case isVisibleChanged(Bool)
     }
 
@@ -39,14 +41,22 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
         /* MARK: Properties */
 
+        var backgroundColor: Color?
         var isVisible = false
         var yOffset: CGFloat = Floats.hiddenYOffset
 
         /* MARK: Computed Properties */
 
         @MainActor
-        var backgroundColor: Color? {
-            Networking.config.activityIndicatorDelegate.backgroundColor
+        var allowsHitTesting: Bool {
+            @Dependency(\.coreKit.ui) var coreUI: CoreKit.UI
+            @Dependency(\.uiApplication) var uiApplication: UIApplication
+            guard isVisible,
+                  !uiApplication.isPresentingAlertController,
+                  uiApplication.presentedViews.first(where: {
+                      $0.tag == coreUI.semTag(for: "OVERLAY_VIEW")
+                  }) == nil else { return false }
+            return true
         }
 
         @MainActor
@@ -59,10 +69,26 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
     func reduce(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
+        case let .backgroundColorChanged(color):
+            state.backgroundColor = color
+
         case .hideIndicator:
             guard state.isVisible else { return .none }
             state.isVisible = false
             state.yOffset = State.Floats.hiddenYOffset
+
+        case .indicatorTapped:
+            guard state.allowsHitTesting else { return .none }
+            return .fireAndForget { @MainActor in
+                guard let tapAction = Networking
+                    .config
+                    .activityIndicatorDelegate
+                    .tapAction else {
+                    return DevModeAction.inspectNetworkHealthAction.perform()
+                }
+
+                tapAction()
+            }
 
         case let .isVisibleChanged(isVisible):
             @Persistent(.isNetworkActivityIndicatorEnabled) var isNetworkActivityIndicatorEnabled: Bool?
@@ -74,9 +100,11 @@ struct NetworkActivityIndicatorReducer: Reducer {
                 return true
             }
 
+            // TODO: Should probably use Task.debounced for this.
             var hideIndicatorTask: Effect<Action> {
                 .cancel(id: State.TaskID.hideIndicator)
-                    .merge(with:
+                    .merge(
+                        with:
                         .task(delay: .seconds(State.Floats.hideIndicatorTaskDelaySeconds)) {
                             .hideIndicator
                         }

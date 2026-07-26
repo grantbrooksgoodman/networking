@@ -47,6 +47,18 @@ import AppSubsystem
 /// }
 /// ```
 ///
+/// When the new value depends on the value currently
+/// stored on the server, use ``update(_:applying:)`` or
+/// ``update(_:applyingRaw:)`` to apply the change
+/// atomically inside a database transaction:
+///
+/// ```swift
+/// let updated = try await document.update(
+///     \.revision,
+///     applying: { ($0 ?? 0) + 1 }
+/// )
+/// ```
+///
 /// Each conformer provides a ``networkPath`` and
 /// ``identifier`` so the default implementation can
 /// construct the database key path automatically (for
@@ -71,11 +83,14 @@ import AppSubsystem
 ///    ``didWrite(_:forKey:)`` to perform any side
 ///    effects.
 ///
-/// > Important: The builder-based ``update(_:)`` does
-/// > not invoke the lifecycle hooks. Only the
-/// > single-property ``update(_:to:)`` method calls
-/// > ``willWrite(_:forKey:updating:)`` and
-/// > ``didWrite(_:forKey:)``.
+/// > Important: Only the single-property
+/// > ``update(_:to:)`` method performs the full write
+/// > lifecycle. The builder-based ``update(_:)`` does
+/// > not invoke either lifecycle hook, and the
+/// > transform-based ``update(_:applying:)`` and
+/// > ``update(_:applyingRaw:)`` methods skip
+/// > ``willWrite(_:forKey:updating:)``, calling only
+/// > ``didWrite(_:forKey:)`` with the committed result.
 ///
 /// Conformers can customize the single-property write
 /// by overriding two hooks:
@@ -224,6 +239,16 @@ public protocol RemotelyUpdatable: Serializable {
     ) async throws(Exception) -> Self
 }
 
+private protocol OptionalValue {
+    static var wrappedType: Any.Type { get }
+}
+
+private protocol SerializableCollection {
+    static func decodedElements(
+        from value: Any
+    ) async throws(Exception) -> Any
+}
+
 public extension RemotelyUpdatable {
     // MARK: - Properties
 
@@ -244,6 +269,156 @@ public extension RemotelyUpdatable {
         for keyPath: PartialKeyPath<Self>
     ) -> SerializableKey? {
         nil
+    }
+
+    /// Atomically transforms the value for the property at
+    /// the given key path on the server and returns the
+    /// updated instance.
+    ///
+    /// Use this method when the new value is derived from
+    /// the value currently stored on the server – for
+    /// example, when incrementing a counter. The transform
+    /// runs inside a database transaction: it receives the
+    /// current server value – or `nil` if no value exists –
+    /// and returns the value to commit. If another client
+    /// changes the value before the commit completes, the
+    /// transaction retries with the latest value until it
+    /// succeeds.
+    ///
+    /// ```swift
+    /// let updated = try await document.update(
+    ///     \.revision,
+    ///     applying: { ($0 ?? 0) + 1 }
+    /// )
+    /// ```
+    ///
+    /// The transform may run more than once, so it must be
+    /// free of side effects. Because the transaction
+    /// commits the transform's return value directly, the
+    /// property's value must be representable as a raw
+    /// Foundation type – for properties whose values encode
+    /// through ``Serializable``, use
+    /// ``update(_:applyingRaw:)`` instead.
+    ///
+    /// This method does not invoke
+    /// ``willWrite(_:forKey:updating:)``.
+    /// ``didWrite(_:forKey:)`` is called with the committed
+    /// result.
+    ///
+    /// > Important: The transform must not remove the
+    /// > value – returning a value the database treats as
+    /// > empty causes this method to throw. Return a
+    /// > sentinel value instead.
+    ///
+    /// - Parameters:
+    ///   - keyPath: A key path to the property to update.
+    ///   - transform: A closure that receives the value
+    ///     currently stored on the server, or `nil` if no
+    ///     value exists, and returns the value to commit.
+    ///
+    /// - Returns: The updated instance.
+    ///
+    /// - Throws: An `Exception` if the key path does not
+    ///   correspond to an updatable property, if the
+    ///   property's value encodes through ``Serializable``,
+    ///   or if the underlying transaction fails.
+    func update<Value>(
+        _ keyPath: KeyPath<Self, Value>,
+        applying transform: @Sendable @escaping (Value?) -> Value
+    ) async throws(Exception) -> Self {
+        guard !Self.isSerializableRepresented(Value.self) else {
+            throw Exception(
+                "Values that encode through Serializable must be transformed with update(_:applyingRaw:).",
+                userInfo: ["ValueType": String(Value.self)],
+                metadata: .init(sender: self)
+            )
+        }
+
+        return try await update(
+            keyPath,
+            applyingRaw: { transform($0 as? Value) }
+        )
+    }
+
+    /// Atomically transforms the raw database value for the
+    /// property at the given key path on the server and
+    /// returns the updated instance.
+    ///
+    /// Use this method when the new value is derived from
+    /// the value currently stored on the server and the
+    /// property's value encodes through ``Serializable`` –
+    /// for example, when merging an entry into a collection
+    /// that multiple clients modify. The transform runs
+    /// inside a database transaction: it receives the raw
+    /// server value – or `nil` if no value exists – and
+    /// returns the raw value to commit. If another client
+    /// changes the value before the commit completes, the
+    /// transaction retries with the latest value until it
+    /// succeeds.
+    ///
+    /// ```swift
+    /// let updated = try await document.update(
+    ///     \.annotations,
+    ///     applyingRaw: { currentValue in
+    ///         var annotations = (currentValue as? [[String: Any]]) ?? []
+    ///         annotations.append(newAnnotation.encoded)
+    ///         return annotations
+    ///     }
+    /// )
+    /// ```
+    ///
+    /// Because ``Serializable/init(from:)`` is
+    /// asynchronous, the transform operates on raw
+    /// representations rather than decoded values. After
+    /// the transaction commits, the committed value is
+    /// decoded into the property's type to produce the
+    /// updated instance.
+    ///
+    /// The transform may run more than once, so it must be
+    /// free of side effects, and its return value must be
+    /// encodable – see
+    /// ``DatabaseDelegate/isEncodable(_:)``.
+    ///
+    /// This method does not invoke
+    /// ``willWrite(_:forKey:updating:)``.
+    /// ``didWrite(_:forKey:)`` is called with the committed
+    /// result.
+    ///
+    /// > Important: The transform must not remove the
+    /// > value – returning `nil` or a value the database
+    /// > treats as empty causes this method to throw.
+    /// > Return a sentinel value instead.
+    ///
+    /// - Parameters:
+    ///   - keyPath: A key path to the property to update.
+    ///   - transform: A closure that receives the raw value
+    ///     currently stored on the server, or `nil` if no
+    ///     value exists, and returns the raw value to
+    ///     commit.
+    ///
+    /// - Returns: The updated instance.
+    ///
+    /// - Throws: An `Exception` if the key path does not
+    ///   correspond to an updatable property, if the
+    ///   committed value cannot be decoded into the
+    ///   property's type, or if the underlying transaction
+    ///   fails.
+    func update<Value>(
+        _ keyPath: KeyPath<Self, Value>,
+        applyingRaw transform: @Sendable @escaping (Any?) -> Any?
+    ) async throws(Exception) -> Self {
+        guard let key = Self.serializableKey(for: keyPath) else {
+            throw .Networking.notRemotelyUpdatable(
+                key: keyPath,
+                .init(sender: self)
+            )
+        }
+
+        return try await updateValue(
+            transforming: transform,
+            forKey: key,
+            as: Value.self
+        )
     }
 
     /// Writes the value for the property at the given key
@@ -396,7 +571,60 @@ extension RemotelyUpdatable where Representation == [String: Any] {
     }
 }
 
+extension Optional: OptionalValue {
+    static var wrappedType: Any.Type {
+        Wrapped.self
+    }
+}
+
 extension RemotelyUpdatable {
+    func updateValue<Value>(
+        transforming transform: @Sendable @escaping (Any?) -> Any?,
+        forKey key: SerializableKey,
+        as _: Value.Type
+    ) async throws(Exception) -> Self {
+        @Dependency(\.networking.database) var database: DatabaseDelegate
+
+        let valueKeyPath = [
+            networkPath.rawValue,
+            identifier,
+            key.rawValue,
+        ].joined(separator: "/")
+
+        guard let committedValue = try await database.runTransaction(
+            at: valueKeyPath,
+            prependingEnvironment: networkPathPrependsCurrentEnvironment,
+            transform
+        ) else {
+            throw Exception(
+                "The transaction removed the value at the specified key.",
+                userInfo: ["Key": key.rawValue],
+                metadata: .init(sender: self)
+            )
+        }
+
+        let decodedCommittedValue = try await decodedValue(
+            from: committedValue,
+            ofType: Value.self
+        )
+
+        guard let updated = modifyKey(
+            key,
+            withValue: decodedCommittedValue
+        ) else {
+            throw .Networking.typeMismatch(
+                key: key,
+                type: type(of: decodedCommittedValue),
+                .init(sender: self)
+            )
+        }
+
+        return try await didWrite(
+            updated,
+            forKey: key
+        )
+    }
+
     func updateValue(
         writing value: Any,
         forKey key: SerializableKey
@@ -472,5 +700,75 @@ extension RemotelyUpdatable {
             newValue,
             forKey: key
         )
+    }
+}
+
+extension Array: SerializableCollection where Element: Serializable {
+    static func decodedElements(
+        from value: Any
+    ) async throws(Exception) -> Any {
+        guard let representations = value as? [Element.Representation] else {
+            throw .Networking.typecastFailed(
+                String([Element.Representation].self),
+                metadata: .init(sender: self)
+            )
+        }
+
+        var elements = [Element]()
+        for representation in representations {
+            let element = try await Element(from: representation)
+            elements.append(element)
+        }
+
+        return elements
+    }
+}
+
+private extension RemotelyUpdatable {
+    static func isSerializableRepresented(_ type: Any.Type) -> Bool {
+        if let optionalType = type as? any OptionalValue.Type {
+            return isSerializableRepresented(optionalType.wrappedType)
+        }
+
+        return type is any Serializable.Type || type is any SerializableCollection.Type
+    }
+
+    func decodedSerializable<T: Serializable>(
+        _: T.Type,
+        from value: Any
+    ) async throws(Exception) -> T {
+        guard let representation = value as? T.Representation else {
+            throw .Networking.typecastFailed(
+                String(T.Representation.self),
+                metadata: .init(sender: self)
+            )
+        }
+
+        return try await T(from: representation)
+    }
+
+    func decodedValue(
+        from value: Any,
+        ofType type: Any.Type
+    ) async throws(Exception) -> Any {
+        if let optionalType = type as? any OptionalValue.Type {
+            return try await decodedValue(
+                from: value,
+                ofType: optionalType.wrappedType
+            )
+        }
+
+        if let serializableType = type as? any Serializable.Type {
+            return try await decodedSerializable(
+                serializableType,
+                from: value
+            )
+        }
+
+        if let collectionType = type as? any SerializableCollection.Type {
+            return try await collectionType.decodedElements(from: value)
+        }
+
+        return value
     }
 }

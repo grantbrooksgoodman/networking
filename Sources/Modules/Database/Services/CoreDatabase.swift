@@ -145,7 +145,6 @@ final class CoreDatabase: @unchecked Sendable {
     // MARK: - Dependencies
 
     @Dependency(\.firebaseDatabase) private var firebaseDatabase: DatabaseReference
-    @Dependency(\.build.isOnline) private var isOnline: Bool
 
     // MARK: - Properties
 
@@ -246,69 +245,38 @@ final class CoreDatabase: @unchecked Sendable {
     ) async throws(Exception) {
         let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
 
-        guard Networking.isReadWriteEnabled else {
-            throw .Networking.readWriteAccessDisabled(
-                .init(sender: self)
-            )
-        }
-
-        guard isOnline else {
-            throw .internetConnectionOffline(
-                metadata: .init(sender: self)
-            )
-        }
-
-        Logger.log(
-            "Incrementing value at path \"\(path)\" by \(delta).",
-            domain: .Networking.database,
+        try await GuardedOperation.run(
+            timeout: duration,
+            recordsCensoredSampleOnTimeout: true,
+            showsActivityIndicator: false,
             sender: self
-        )
+        ) { healthToken, settle in
+            Logger.log(
+                "Incrementing value at path \"\(path)\" by \(delta).",
+                domain: .Networking.database,
+                sender: self
+            )
 
-        do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-                @LockIsolated var didResume = false
-                var canResume: Bool {
-                    $didResume.withValue {
-                        guard !$0 else { return false }
-                        $0 = true
-                        return true
-                    }
-                }
-
-                let timeout = Timeout(after: duration) {
-                    guard canResume else { return }
-                    continuation.resume(
-                        throwing: Exception.timedOut(
+            let healthStartTime = Date.now
+            firebaseDatabase.child(path).setValue(
+                ServerValue.increment(NSNumber(value: delta)),
+                withCompletionBlock: { error, _ in
+                    let exception = error.map {
+                        Exception(
+                            $0,
                             metadata: .init(sender: self)
                         )
-                    )
-                }
-
-                firebaseDatabase.child(path).setValue(
-                    ServerValue.increment(NSNumber(value: delta)),
-                    withCompletionBlock: { error, _ in
-                        timeout.cancel()
-                        guard canResume else { return }
-
-                        if let error {
-                            continuation.resume(
-                                throwing: Exception(
-                                    error,
-                                    metadata: .init(sender: self)
-                                )
-                            )
-                        } else {
-                            continuation.resume()
-                        }
                     }
-                )
-            }
-        } catch let error as Exception {
-            throw error
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
+
+                    HealthEvidence.record(
+                        error: exception,
+                        startTime: healthStartTime,
+                        token: healthToken
+                    )
+
+                    guard let exception else { return settle(.success(nil)) }
+                    settle(.failure(exception))
+                }
             )
         }
 
@@ -402,12 +370,15 @@ final class CoreDatabase: @unchecked Sendable {
         prependingEnvironment: Bool,
         timeout duration: Duration
     ) async throws(Exception) -> Any? {
-        try await Self.coalescer(
+        let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
+        let resolvedGlobalRawValue = globalCacheStrategy.map(\.resolved.rawValue) ?? ""
+
+        return try await Self.coalescer(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
-                operation.encodedHash
-                    + (globalCacheStrategy?.rawValue ?? "")
+                resolvedOperation.encodedHash
+                    + resolvedGlobalRawValue
                     + prependingEnvironment.description
                     + duration.description
             ).encodedHash
@@ -419,19 +390,16 @@ final class CoreDatabase: @unchecked Sendable {
                 ))
             }
 
-            return await withCheckedContinuation { continuation in
-                self._performOperation(
-                    operation,
+            do throws(Exception) {
+                let result = try await _performOperation(
+                    resolvedOperation,
                     prependingEnvironment: prependingEnvironment,
                     timeout: duration
-                ) { result in
-                    switch result {
-                    case let .success(value):
-                        continuation.resume(returning: .success(value))
-                    case let .failure(exception):
-                        continuation.resume(returning: .failure(exception))
-                    }
-                }
+                )
+
+                return .success(result)
+            } catch {
+                return .failure(error)
             }
         }.get()
     }
@@ -439,82 +407,70 @@ final class CoreDatabase: @unchecked Sendable {
     private func _performOperation(
         _ operation: DatabaseOperation,
         prependingEnvironment: Bool,
-        timeout duration: Duration,
-        completion: @escaping (Result<Any?, Exception>) -> Void
-    ) {
-        guard Networking.isReadWriteEnabled else {
-            return completion(.failure(
-                .Networking.readWriteAccessDisabled(.init(sender: self))
-            ))
-        }
+        timeout duration: Duration
+    ) async throws(Exception) -> Any? {
+        try await GuardedOperation.run(
+            timeout: duration,
+            recordsCensoredSampleOnTimeout: true,
+            showsActivityIndicator: true,
+            sender: self
+        ) { healthToken, settle in
+            Task {
+                do throws(Exception) {
+                    let result: Any? = switch operation {
+                    case let .getValues(
+                        atPath: path,
+                        cacheStrategy: cacheStrategy
+                    ):
+                        try await getValues(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved,
+                            healthToken: healthToken
+                        )
 
-        guard isOnline else {
-            return completion(.failure(
-                .internetConnectionOffline(metadata: .init(sender: self))
-            ))
-        }
-
-        let completion = OperationCompletion(completion)
-        let timeout = Timeout(after: duration) {
-            completion(.failure(
-                .timedOut(metadata: .init(sender: self))
-            ))
-        }
-
-        Task {
-            do throws(Exception) {
-                let result: Any? = switch operation {
-                case let .getValues(
-                    atPath: path,
-                    cacheStrategy: cacheStrategy
-                ):
-                    try await getValues(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                    )
-
-                case let .queryValues(
-                    atPath: path,
-                    strategy: strategy,
-                    cacheStrategy: cacheStrategy
-                ):
-                    try await queryValues(
-                        at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                    case let .queryValues(
+                        atPath: path,
                         strategy: strategy,
-                        cacheStrategy: globalCacheStrategy ?? cacheStrategy
-                    )
+                        cacheStrategy: cacheStrategy
+                    ):
+                        try await queryValues(
+                            at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
+                            strategy: strategy,
+                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved,
+                            healthToken: healthToken
+                        )
 
-                case let .setValue(
-                    value,
-                    forKey: key
-                ):
-                    try await setValue(
+                    case let .setValue(
                         value,
-                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key
-                    )
+                        forKey: key
+                    ):
+                        try await setValue(
+                            value,
+                            forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
+                            healthToken: healthToken
+                        )
 
-                case let .updateChildValues(
-                    forKey: key,
-                    withData: data
-                ):
-                    try await updateChildValues(
-                        forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
-                        with: data
-                    )
+                    case let .updateChildValues(
+                        forKey: key,
+                        withData: data
+                    ):
+                        try await updateChildValues(
+                            forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
+                            with: data,
+                            healthToken: healthToken
+                        )
+                    }
+
+                    settle(.success(result))
+                } catch {
+                    settle(.failure(error))
                 }
-
-                timeout.cancel()
-                completion(.success(result))
-            } catch {
-                timeout.cancel()
-                completion(.failure(error))
             }
         }
     }
 
     // MARK: - Transaction
 
-    // swiftlint:disable:next function_body_length
     func runTransaction(
         at path: String,
         prependingEnvironment: Bool,
@@ -523,96 +479,68 @@ final class CoreDatabase: @unchecked Sendable {
     ) async throws(Exception) -> Any? {
         let path = prependingEnvironment ? path.prependingCurrentEnvironment : path
 
-        guard Networking.isReadWriteEnabled else {
-            throw .Networking.readWriteAccessDisabled(
-                .init(sender: self)
-            )
-        }
-
-        guard isOnline else {
-            throw .internetConnectionOffline(
-                metadata: .init(sender: self)
-            )
-        }
-
-        Logger.log(
-            "Running transaction at path \"\(path)\".",
-            domain: .Networking.database,
+        let committedValue = try await GuardedOperation.run(
+            timeout: duration,
+            recordsCensoredSampleOnTimeout: true,
+            showsActivityIndicator: false,
             sender: self
-        )
+        ) { healthToken, settle in
+            Logger.log(
+                "Running transaction at path \"\(path)\".",
+                domain: .Networking.database,
+                sender: self
+            )
 
-        do {
-            return try await withCheckedThrowingContinuation { continuation in
-                @LockIsolated var didResume = false
-                var canResume: Bool {
-                    $didResume.withValue {
-                        guard !$0 else { return false }
-                        $0 = true
-                        return true
-                    }
-                }
-
-                let timeout = Timeout(after: duration) {
-                    guard canResume else { return }
-                    continuation.resume(
-                        throwing: Exception.timedOut(
-                            metadata: .init(sender: self)
-                        )
+            let healthStartTime = Date.now
+            firebaseDatabase.child(path).runTransactionBlock { mutableData in
+                let currentValue = self.isEmpty(mutableData.value) ? nil : mutableData.value
+                mutableData.value = block(currentValue) as Any
+                return .success(withValue: mutableData)
+            } andCompletionBlock: { error, _, snapshot in
+                let exception = error.map {
+                    Exception(
+                        $0,
+                        metadata: .init(sender: self)
                     )
                 }
 
-                firebaseDatabase.child(path).runTransactionBlock { mutableData in
-                    let currentValue = self.isEmpty(mutableData.value) ? nil : mutableData.value
-                    mutableData.value = block(currentValue) as Any
-                    return .success(withValue: mutableData)
-                } andCompletionBlock: { error, _, snapshot in
-                    timeout.cancel()
-                    guard canResume else { return }
+                HealthEvidence.record(
+                    error: exception,
+                    startTime: healthStartTime,
+                    token: healthToken
+                )
 
-                    if let error {
-                        continuation.resume(
-                            throwing: Exception(
-                                error,
-                                metadata: .init(sender: self)
-                            )
-                        )
-
-                        return
-                    }
-
-                    let committedValue = self.isEmpty(snapshot?.value) ? nil : snapshot?.value
-                    if let committedValue {
-                        CoreDatabaseStore.addValue(
-                            .init(
-                                data: committedValue,
-                                expiresAfter: .milliseconds(
-                                    Networking.cacheExpiryMilliseconds(for: .now)
-                                )
-                            ),
-                            forKey: path
-                        )
-                    } else {
-                        CoreDatabaseStore.removeValue(forKey: path)
-                    }
-
-                    continuation.resume(returning: committedValue)
+                guard let exception else {
+                    return settle(.success(self.isEmpty(snapshot?.value) ? nil : snapshot?.value))
                 }
+
+                settle(.failure(exception))
             }
-        } catch let error as Exception {
-            throw error
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
         }
+
+        if let committedValue {
+            CoreDatabaseStore.addValue(
+                .init(
+                    data: committedValue,
+                    expiresAfter: .milliseconds(
+                        Networking.cacheExpiryMilliseconds(for: .now)
+                    )
+                ),
+                forKey: path
+            )
+        } else {
+            CoreDatabaseStore.removeValue(forKey: path)
+        }
+
+        return committedValue
     }
 
     // MARK: - Value Retrieval
 
     private func getValues(
         at path: String,
-        cacheStrategy: CacheStrategy
+        cacheStrategy: CacheStrategy,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
@@ -631,7 +559,10 @@ final class CoreDatabase: @unchecked Sendable {
 
         let getValuesStartDate = Date.now
         do {
-            let values = try await _getValues(at: path)
+            let values = try await _getValues(
+                at: path,
+                healthToken: healthToken
+            )
 
             CoreDatabaseStore.addValue(
                 .init(
@@ -654,53 +585,61 @@ final class CoreDatabase: @unchecked Sendable {
         }
     }
 
-    private func _getValues(at path: String) async throws(Exception) -> Any {
-        do {
-            return try await withCheckedThrowingContinuation { continuation in
-                @LockIsolated var didResume = false
-                var canResume: Bool {
-                    $didResume.withValue {
-                        guard !$0 else { return false }
-                        $0 = true
-                        return true
+    private func _getValues(
+        at path: String,
+        healthToken: HealthSampleToken
+    ) async throws(Exception) -> Any {
+        try await HealthEvidence.measure(
+            token: healthToken
+        ) { () async throws(Exception) -> Any in
+            do {
+                return try await withCheckedThrowingContinuation { continuation in
+                    @LockIsolated var didResume = false
+                    var canResume: Bool {
+                        $didResume.withValue {
+                            guard !$0 else { return false }
+                            $0 = true
+                            return true
+                        }
                     }
-                }
 
-                firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in
-                    guard !self.isEmpty(snapshot.value),
-                          let value = snapshot.value else {
+                    firebaseDatabase.child(path).observeSingleEvent(of: .value) { snapshot in
+                        guard !self.isEmpty(snapshot.value),
+                              let value = snapshot.value else {
+                            guard canResume else { return }
+                            return continuation.resume(throwing: Exception(
+                                "No value exists at the specified key path.",
+                                userInfo: ["Path": path],
+                                metadata: .init(sender: self)
+                            ))
+                        }
+
                         guard canResume else { return }
-                        return continuation.resume(throwing: Exception(
-                            "No value exists at the specified key path.",
-                            userInfo: ["Path": path],
+                        continuation.resume(returning: value)
+                    } withCancel: { error in
+                        guard canResume else { return }
+                        continuation.resume(throwing: Exception(
+                            error,
                             metadata: .init(sender: self)
                         ))
                     }
-
-                    guard canResume else { return }
-                    continuation.resume(returning: value)
-                } withCancel: { error in
-                    guard canResume else { return }
-                    continuation.resume(throwing: Exception(
-                        error,
-                        metadata: .init(sender: self)
-                    ))
                 }
+            } catch let error as Exception {
+                throw error
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
             }
-        } catch let error as Exception {
-            throw error
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
         }
     }
 
     private func queryValues(
         at path: String,
         strategy: QueryStrategy,
-        cacheStrategy: CacheStrategy
+        cacheStrategy: CacheStrategy,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         var cachedValue: Any? {
             CoreDatabaseStore.getValue(forKey: path)
@@ -724,8 +663,20 @@ final class CoreDatabase: @unchecked Sendable {
         case let .last(limit): reference.queryLimited(toLast: .init(limit))
         }
 
-        do {
-            let getDataResult = try await query.getData()
+        do throws(Exception) {
+            let getDataResult = try await HealthEvidence.measure(
+                token: healthToken
+            ) { () async throws(Exception) -> DataSnapshot in
+                do {
+                    return try await query.getData()
+                } catch {
+                    throw Exception(
+                        error,
+                        metadata: .init(sender: self)
+                    )
+                }
+            }
+
             guard !isEmpty(getDataResult.value),
                   let value = getDataResult.value else {
                 throw Exception(
@@ -744,22 +695,11 @@ final class CoreDatabase: @unchecked Sendable {
             )
 
             return value
-        } catch let error as Exception {
+        } catch {
             guard cacheStrategy == .returnCacheOnFailure,
                   let cachedValue else { throw error }
 
             Logger.log(error, domain: .Networking.database)
-            return cachedValue
-        } catch {
-            let exception = Exception(
-                error,
-                metadata: .init(sender: self)
-            )
-
-            guard cacheStrategy == .returnCacheOnFailure,
-                  let cachedValue else { throw exception }
-
-            Logger.log(exception, domain: .Networking.database)
             return cachedValue
         }
     }
@@ -768,7 +708,8 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func setValue(
         _ value: Any,
-        forKey key: String
+        forKey key: String,
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         guard isEncodable(value) else {
             throw .Networking.invalidType(
@@ -783,15 +724,19 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        do {
-            _ = try await firebaseDatabase
-                .child(key)
-                .setValue(value)
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
+        try await HealthEvidence.measure(
+            token: healthToken
+        ) { () async throws(Exception) in
+            do {
+                _ = try await firebaseDatabase
+                    .child(key)
+                    .setValue(value)
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
 
         CoreDatabaseStore.addValue(
@@ -809,7 +754,8 @@ final class CoreDatabase: @unchecked Sendable {
 
     private func updateChildValues(
         forKey key: String,
-        with data: [String: Any]
+        with data: [String: Any],
+        healthToken: HealthSampleToken
     ) async throws(Exception) -> Any? {
         guard data.values.allSatisfy({ isEncodable($0) }) else {
             throw .Networking.invalidType(
@@ -824,15 +770,19 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        do {
-            _ = try await firebaseDatabase
-                .child(key)
-                .updateChildValues(data)
-        } catch {
-            throw Exception(
-                error,
-                metadata: .init(sender: self)
-            )
+        try await HealthEvidence.measure(
+            token: healthToken
+        ) { () async throws(Exception) in
+            do {
+                _ = try await firebaseDatabase
+                    .child(key)
+                    .updateChildValues(data)
+            } catch {
+                throw Exception(
+                    error,
+                    metadata: .init(sender: self)
+                )
+            }
         }
 
         // When data keys contain "/" the payload is a multi-path

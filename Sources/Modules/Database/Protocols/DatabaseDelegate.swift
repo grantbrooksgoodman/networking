@@ -27,6 +27,11 @@ import AppSubsystem
 ///     at: "users/123"
 /// )
 ///
+/// // Read and decode a Serializable model.
+/// let user: User = try await database.getValue(
+///     at: "users/123"
+/// )
+///
 /// // Write a value.
 /// try await database.setValue(
 ///     "Jane",
@@ -225,7 +230,7 @@ public protocol DatabaseDelegate {
     /// transaction retries automatically until it succeeds
     /// or reaches the maximum retry count.
     ///
-    /// Each transaction bypasses operation coalescing —
+    /// Each transaction bypasses operation coalescing –
     /// concurrent transactions are always executed
     /// independently.
     ///
@@ -321,7 +326,7 @@ public extension DatabaseDelegate {
     /// Atomically writes a set of values across multiple
     /// database paths in a single operation.
     ///
-    /// Use this method to perform fan-out writes — updates
+    /// Use this method to perform fan-out writes – updates
     /// that touch several paths simultaneously. All paths
     /// in `updates` are written atomically: either every
     /// path is updated or none are.
@@ -369,6 +374,59 @@ public extension DatabaseDelegate {
         )
     }
 
+    /// Reads and decodes the ``Serializable`` value stored
+    /// at the specified path.
+    ///
+    /// Use this method to read a model in a single step.
+    /// The value's raw representation is fetched from the
+    /// database and decoded through the type's
+    /// ``Serializable/init(from:)``:
+    ///
+    /// ```swift
+    /// let document: Document = try await database.getValue(
+    ///     at: "documents/123"
+    /// )
+    /// ```
+    ///
+    /// The compiler resolves `T` from the annotation at the
+    /// call site, so the stored representation is validated
+    /// against the type's ``Serializable/Representation``
+    /// before decoding begins.
+    ///
+    /// - Parameters:
+    ///   - path: The database path to read from.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the path. The default is `true`.
+    ///   - cacheStrategy: The caching behavior for this
+    ///     operation. The default is
+    ///     ``CacheStrategy/returnCacheFirst``.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Returns: The decoded value stored at the path, as
+    ///   type `T`.
+    ///
+    /// - Throws: An ``Exception`` if the read fails, the
+    ///   stored value does not match the type's
+    ///   representation, or decoding fails.
+    func getValue<T: Serializable>(
+        at path: String,
+        prependingEnvironment: Bool = true,
+        cacheStrategy: CacheStrategy = .returnCacheFirst,
+        timeout duration: Duration = Networking.defaultOperationTimeout
+    ) async throws(Exception) -> T {
+        let representation: T.Representation = try await getValues(
+            at: path,
+            prependingEnvironment: prependingEnvironment,
+            cacheStrategy: cacheStrategy,
+            timeout: duration
+        )
+
+        return try await T(from: representation)
+    }
+
     /// Reads the value stored at the specified path as the
     /// inferred type.
     ///
@@ -397,7 +455,7 @@ public extension DatabaseDelegate {
         at path: String,
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> T {
         try await getValues(
             at: path,
@@ -431,7 +489,7 @@ public extension DatabaseDelegate {
         at path: String,
         by delta: Int,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await increment(
             at: path,
@@ -445,7 +503,7 @@ public extension DatabaseDelegate {
     /// specified path each time it changes.
     ///
     /// This method calls
-    /// ``observe(at:prependingEnvironment:)``
+    /// ``observe(path:prependingEnvironment:)``
     /// with default parameter values.
     ///
     /// - Parameters:
@@ -498,7 +556,7 @@ public extension DatabaseDelegate {
         strategy: QueryStrategy = .first(10),
         prependingEnvironment: Bool = true,
         cacheStrategy: CacheStrategy = .returnCacheFirst,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) -> T {
         try await queryValues(
             at: path,
@@ -536,7 +594,7 @@ public extension DatabaseDelegate {
     func runTransaction(
         at path: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10),
+        timeout duration: Duration = Networking.defaultOperationTimeout,
         _ block: @Sendable @escaping (Any?) -> Any?
     ) async throws(Exception) -> Any? {
         try await runTransaction(
@@ -569,7 +627,7 @@ public extension DatabaseDelegate {
         _ value: Any,
         forKey key: String,
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await setValue(
             value,
@@ -603,7 +661,7 @@ public extension DatabaseDelegate {
         forKey key: String,
         with data: [String: Any],
         prependingEnvironment: Bool = true,
-        timeout duration: Duration = .seconds(10)
+        timeout duration: Duration = Networking.defaultOperationTimeout
     ) async throws(Exception) {
         try await updateChildValues(
             forKey: key,

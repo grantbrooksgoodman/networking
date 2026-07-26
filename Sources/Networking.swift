@@ -81,6 +81,15 @@ public enum Networking {
     /// called.
     public static let config = Config.shared
 
+    /// The default timeout duration applied to database and
+    /// storage operations when no explicit value is provided.
+    ///
+    /// This constant is the single source of truth for the
+    /// hard-coded ten-second default that appears across all
+    /// ``DatabaseDelegate`` and ``StorageDelegate`` convenience
+    /// overloads.
+    public static let defaultOperationTimeout = Duration.seconds(10)
+
     private static let _didInitialize = LockIsolated(false)
 
     /* MARK: Computed Properties */
@@ -97,8 +106,10 @@ public enum Networking {
     ///
     /// Call this method once at app launch. It configures
     /// Firebase App Check, initializes the Firebase
-    /// backend, registers Developer Mode actions, and
-    /// begins monitoring read/write enablement status.
+    /// backend, registers Developer Mode actions, starts
+    /// network health monitoring, and begins observing
+    /// read/write enablement status. Monitoring begins in
+    /// background tasks and does not block launch.
     ///
     /// App Check uses App Attest on physical devices and
     /// a debug provider in the simulator. The provider
@@ -114,8 +125,12 @@ public enum Networking {
         AppCheck.configure()
         FirebaseApp.configure()
         didInitialize = true
-        DevModeService.insertAction(.switchEnvironmentAction, at: 0)
-        DevModeService.insertAction(.toggleNetworkActivityIndicatorAction, at: 1)
+
+        DevModeService.insertAction(.networkingOptionsAction, at: 0)
+
+        Task.background {
+            config.healthDelegate.startMonitoring()
+        }
 
         Task.background { @MainActor in
             ReadWriteEnablementStatusService.shared.listenForReadWriteEnablementStatusChanges()
@@ -137,7 +152,7 @@ public extension Networking {
     ///
     /// Delegates with sensible defaults are provided
     /// automatically. To supply a custom conformance,
-    /// use ``register(activityIndicatorDelegate:authDelegate:databaseDelegate:geminiAPIKeyDelegate:hostedTranslationDelegate:storageDelegate:)``
+    /// use ``register(activityIndicatorDelegate:authDelegate:databaseDelegate:geminiAPIKeyDelegate:healthDelegate:hostedTranslationDelegate:storageDelegate:)``
     /// or one of the individual registration methods:
     ///
     /// ```swift
@@ -163,9 +178,23 @@ public extension Networking {
         /// ``setIsEnhancedDialogTranslationEnabled(_:)``.
         @LockIsolated public private(set) var isEnhancedDialogTranslationEnabled = false
 
+        /// The active network health estimation
+        /// configuration.
+        ///
+        /// This value controls the scoring parameters
+        /// used by the health estimator, including
+        /// channel weights, ramp anchors, and tier
+        /// boundaries. The default configuration is
+        /// suitable for most use cases.
+        ///
+        /// To change this value, call
+        /// ``setNetworkHealthConfiguration(_:)``.
+        @LockIsolated public private(set) var networkHealthConfiguration = NetworkHealthConfiguration.default
+
         @LockIsolated package private(set) var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
         @LockIsolated package private(set) var authDelegate: AuthDelegate = Auth()
         @LockIsolated package private(set) var databaseDelegate: DatabaseDelegate = Database()
+        @LockIsolated package private(set) var healthDelegate: NetworkHealthDelegate = NetworkHealthService.shared
         @LockIsolated package private(set) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
         @LockIsolated package private(set) var storageDelegate: StorageDelegate = Storage()
 
@@ -226,7 +255,9 @@ public extension Networking {
         ///
         /// - Parameter environment: The environment to
         ///   activate.
-        public func setEnvironment(_ environment: NetworkEnvironment) {
+        public func setEnvironment(
+            _ environment: NetworkEnvironment
+        ) {
             @Persistent(.networkEnvironment) var persistedValue: NetworkEnvironment?
             persistedValue = environment
         }
@@ -245,7 +276,9 @@ public extension Networking {
         /// - Parameter enhancedTranslationStatusVerbosity:
         ///   The verbosity level to use, or `nil` to
         ///   disable status messages.
-        public func setEnhancedTranslationStatusVerbosity(_ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?) {
+        public func setEnhancedTranslationStatusVerbosity(
+            _ enhancedTranslationStatusVerbosity: EnhancedTranslationStatusVerbosity?
+        ) {
             _enhancedTranslationStatusVerbosity.wrappedValue = enhancedTranslationStatusVerbosity
         }
 
@@ -256,8 +289,21 @@ public extension Networking {
         ///   A Boolean value that determines whether
         ///   AI enhancement is applied to dialog
         ///   translations.
-        public func setIsEnhancedDialogTranslationEnabled(_ isEnhancedDialogTranslationEnabled: Bool) {
+        public func setIsEnhancedDialogTranslationEnabled(
+            _ isEnhancedDialogTranslationEnabled: Bool
+        ) {
             self.isEnhancedDialogTranslationEnabled = isEnhancedDialogTranslationEnabled
+        }
+
+        /// Sets the network health estimation
+        /// configuration.
+        ///
+        /// - Parameter networkHealthConfiguration: The
+        ///   configuration to use.
+        public func setNetworkHealthConfiguration(
+            _ networkHealthConfiguration: NetworkHealthConfiguration
+        ) {
+            self.networkHealthConfiguration = networkHealthConfiguration
         }
 
         /* MARK: Delegate Registration */
@@ -290,6 +336,8 @@ public extension Networking {
         ///     delegate.
         ///   - geminiAPIKeyDelegate: A custom Gemini
         ///     API key delegate.
+        ///   - healthDelegate: A custom network health
+        ///     delegate.
         ///   - hostedTranslationDelegate: A custom
         ///     hosted translation delegate.
         ///   - storageDelegate: A custom storage
@@ -303,6 +351,7 @@ public extension Networking {
             authDelegate: AuthDelegate? = nil,
             databaseDelegate: DatabaseDelegate? = nil,
             geminiAPIKeyDelegate: GeminiAPIKeyDelegate? = nil,
+            healthDelegate: NetworkHealthDelegate? = nil,
             hostedTranslationDelegate: HostedTranslationDelegate? = nil,
             storageDelegate: StorageDelegate? = nil
         ) {
@@ -310,6 +359,7 @@ public extension Networking {
                 authDelegate != nil ||
                 databaseDelegate != nil ||
                 geminiAPIKeyDelegate != nil ||
+                healthDelegate != nil ||
                 hostedTranslationDelegate != nil ||
                 storageDelegate != nil else {
                 assertionFailure("No delegates provided in arguments.")
@@ -320,6 +370,7 @@ public extension Networking {
             if let authDelegate { self.authDelegate = authDelegate }
             if let databaseDelegate { self.databaseDelegate = databaseDelegate }
             if let geminiAPIKeyDelegate { _geminiAPIKeyDelegate.wrappedValue = geminiAPIKeyDelegate }
+            if let healthDelegate { self.healthDelegate = healthDelegate }
             if let hostedTranslationDelegate { self.hostedTranslationDelegate = hostedTranslationDelegate }
             if let storageDelegate { self.storageDelegate = storageDelegate }
         }
@@ -331,7 +382,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``NetworkActivityIndicatorDelegate``
-        public func registerActivityIndicatorDelegate(_ activityIndicatorDelegate: NetworkActivityIndicatorDelegate) {
+        public func registerActivityIndicatorDelegate(
+            _ activityIndicatorDelegate: NetworkActivityIndicatorDelegate
+        ) {
             register(activityIndicatorDelegate: activityIndicatorDelegate)
         }
 
@@ -341,8 +394,22 @@ public extension Networking {
         ///   register.
         ///
         /// - SeeAlso: ``AuthDelegate``
-        public func registerAuthDelegate(_ authDelegate: AuthDelegate) {
+        public func registerAuthDelegate(
+            _ authDelegate: AuthDelegate
+        ) {
             register(authDelegate: authDelegate)
+        }
+
+        /// Registers a custom network health delegate.
+        ///
+        /// - Parameter healthDelegate: The delegate to
+        ///   register.
+        ///
+        /// - SeeAlso: ``NetworkHealthDelegate``
+        public func registerHealthDelegate(
+            _ healthDelegate: NetworkHealthDelegate
+        ) {
+            register(healthDelegate: healthDelegate)
         }
 
         /// Registers a custom hosted translation
@@ -352,7 +419,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``HostedTranslationDelegate``
-        public func registerHostedTranslationDelegate(_ hostedTranslationDelegate: HostedTranslationDelegate) {
+        public func registerHostedTranslationDelegate(
+            _ hostedTranslationDelegate: HostedTranslationDelegate
+        ) {
             register(hostedTranslationDelegate: hostedTranslationDelegate)
         }
 
@@ -362,7 +431,9 @@ public extension Networking {
         ///   to register.
         ///
         /// - SeeAlso: ``DatabaseDelegate``
-        public func registerDatabaseDelegate(_ databaseDelegate: DatabaseDelegate) {
+        public func registerDatabaseDelegate(
+            _ databaseDelegate: DatabaseDelegate
+        ) {
             register(databaseDelegate: databaseDelegate)
         }
 
@@ -372,7 +443,9 @@ public extension Networking {
         ///   delegate to register.
         ///
         /// - SeeAlso: ``GeminiAPIKeyDelegate``
-        public func registerGeminiAPIKeyDelegate(_ geminiAPIKeyDelegate: GeminiAPIKeyDelegate) {
+        public func registerGeminiAPIKeyDelegate(
+            _ geminiAPIKeyDelegate: GeminiAPIKeyDelegate
+        ) {
             register(geminiAPIKeyDelegate: geminiAPIKeyDelegate)
         }
 
@@ -382,7 +455,9 @@ public extension Networking {
         ///   register.
         ///
         /// - SeeAlso: ``StorageDelegate``
-        public func registerStorageDelegate(_ storageDelegate: StorageDelegate) {
+        public func registerStorageDelegate(
+            _ storageDelegate: StorageDelegate
+        ) {
             register(storageDelegate: storageDelegate)
         }
     }

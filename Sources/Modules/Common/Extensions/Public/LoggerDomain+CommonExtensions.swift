@@ -23,8 +23,10 @@ public extension LoggerDomain {
         /// The logger domain for database operations.
         public static let database = LoggerDomain("database")
 
-        /// The logger domain for hosted translation
-        /// operations.
+        /// The logger domain for network health events.
+        public static let health = LoggerDomain("health")
+
+        /// The logger domain for hosted translation operations.
         public static let hostedTranslation = LoggerDomain("hostedTranslation")
 
         /// The logger domain for file storage operations.
