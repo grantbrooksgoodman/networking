@@ -49,14 +49,8 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
         @MainActor
         var allowsHitTesting: Bool {
-            @Dependency(\.coreKit.ui) var coreUI: CoreKit.UI
             @Dependency(\.uiApplication) var uiApplication: UIApplication
-            guard isVisible,
-                  !uiApplication.isPresentingAlertController,
-                  uiApplication.presentedViews.first(where: {
-                      $0.tag == coreUI.semTag(for: "OVERLAY_VIEW")
-                  }) == nil else { return false }
-            return true
+            return isVisible && !uiApplication.isPresentingAlertController
         }
 
         @MainActor

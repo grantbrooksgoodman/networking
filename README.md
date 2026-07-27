@@ -50,6 +50,7 @@ Networking extends the architecture provided by [AppSubsystem](https://github.co
 - [Performance](#performance)
   - [Connection Prewarming](#connection-prewarming)
   - [Operation Coalescing](#operation-coalescing)
+  - [Cooperative Cancellation](#cooperative-cancellation)
   - [Adaptive Caching](#adaptive-caching)
 - [Delegate Customization](#delegate-customization)
 - [Dependencies](#dependencies)
@@ -920,6 +921,14 @@ The default database and storage implementations automatically coalesce identica
 This deduplication is transparent and requires no additional configuration.
 
 Progress-reporting operations (`uploadWithProgress` and `downloadItemWithProgress`) are the exception – they are never coalesced. Coalescing delivers a single shared result to all callers, which would leave all but one caller without progress events. Each progress-reporting call therefore performs its own transfer.
+
+### Cooperative Cancellation
+
+Database and storage operations respect the cancellation of the task that awaits them. When the calling task is cancelled – whether before the operation is dispatched or while awaiting its result – the operation throws a non-reportable cancellation `Exception` promptly rather than waiting for the network to respond. If the calling task is already cancelled on entry, no work is started.
+
+Cancellation abandons the wait; it does not abort the work. The in-flight request continues until it settles or times out, so coalesced callers still receive their shared result, caches are still populated, and a cancelled write may still reach the backend – the same semantics as a timeout. Treat cancellation exceptions as control flow rather than failures: handle them silently, and never surface them to the user.
+
+Progress-reporting transfers are the exception – because each call performs its own transfer, cancelling the calling task aborts the transfer itself.
 
 ### Adaptive Caching
 

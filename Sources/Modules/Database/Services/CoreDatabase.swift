@@ -258,7 +258,7 @@ final class CoreDatabase: @unchecked Sendable {
             )
 
             let healthStartTime = Date.now
-            firebaseDatabase.child(path).setValue(
+            self.firebaseDatabase.child(path).setValue(
                 ServerValue.increment(NSNumber(value: delta)),
                 withCompletionBlock: { error, _ in
                     let exception = error.map {
@@ -373,7 +373,7 @@ final class CoreDatabase: @unchecked Sendable {
         let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
         let resolvedGlobalRawValue = globalCacheStrategy.map(\.resolved.rawValue) ?? ""
 
-        return try await Self.coalescer(
+        let callback = await Self.coalescer.submitUnlessCancelled(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
@@ -401,7 +401,15 @@ final class CoreDatabase: @unchecked Sendable {
             } catch {
                 return .failure(error)
             }
-        }.get()
+        }
+
+        guard let callback else {
+            throw .cancelled(
+                metadata: .init(sender: self)
+            )
+        }
+
+        return try callback.get()
     }
 
     private func _performOperation(
@@ -422,9 +430,9 @@ final class CoreDatabase: @unchecked Sendable {
                         atPath: path,
                         cacheStrategy: cacheStrategy
                     ):
-                        try await getValues(
+                        try await self.getValues(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved,
+                            cacheStrategy: (self.globalCacheStrategy ?? cacheStrategy).resolved,
                             healthToken: healthToken
                         )
 
@@ -433,10 +441,10 @@ final class CoreDatabase: @unchecked Sendable {
                         strategy: strategy,
                         cacheStrategy: cacheStrategy
                     ):
-                        try await queryValues(
+                        try await self.queryValues(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                             strategy: strategy,
-                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved,
+                            cacheStrategy: (self.globalCacheStrategy ?? cacheStrategy).resolved,
                             healthToken: healthToken
                         )
 
@@ -444,7 +452,7 @@ final class CoreDatabase: @unchecked Sendable {
                         value,
                         forKey: key
                     ):
-                        try await setValue(
+                        try await self.setValue(
                             value,
                             forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
                             healthToken: healthToken
@@ -454,7 +462,7 @@ final class CoreDatabase: @unchecked Sendable {
                         forKey: key,
                         withData: data
                     ):
-                        try await updateChildValues(
+                        try await self.updateChildValues(
                             forKey: prependingEnvironment ? key.prependingCurrentEnvironment : key,
                             with: data,
                             healthToken: healthToken
@@ -492,7 +500,7 @@ final class CoreDatabase: @unchecked Sendable {
             )
 
             let healthStartTime = Date.now
-            firebaseDatabase.child(path).runTransactionBlock { mutableData in
+            self.firebaseDatabase.child(path).runTransactionBlock { mutableData in
                 let currentValue = self.isEmpty(mutableData.value) ? nil : mutableData.value
                 mutableData.value = block(currentValue) as Any
                 return .success(withValue: mutableData)
@@ -511,7 +519,9 @@ final class CoreDatabase: @unchecked Sendable {
                 )
 
                 guard let exception else {
-                    return settle(.success(self.isEmpty(snapshot?.value) ? nil : snapshot?.value))
+                    return settle(.success(
+                        self.isEmpty(snapshot?.value) ? nil : snapshot?.value
+                    ))
                 }
 
                 settle(.failure(exception))
