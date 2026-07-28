@@ -22,13 +22,20 @@ struct NetworkActivityIndicator: View {
     // MARK: - Properties
 
     @StateObject private var viewModel: ViewModel<NetworkActivityIndicatorReducer>
-    @StateObject private var observer: ViewObserver<NetworkActivityIndicatorObserver>
 
     // MARK: - Init
 
     init(_ viewModel: ViewModel<NetworkActivityIndicatorReducer>) {
-        _viewModel = .init(wrappedValue: viewModel)
-        _observer = .init(wrappedValue: .init(.init(viewModel)))
+        _viewModel = .init(
+            wrappedValue: viewModel
+                .observing(
+                    // Dropping the first element skips the replayed current
+                    // value; activity effects should only run for changes
+                    // occurring after subscription.
+                    Shared.isNetworkActivityOccurring.changes.dropFirst()
+                ) { .isVisibleChanged($0) }
+                .observing(Shared.networkHealth.changes) { _ in .healthChanged }
+        )
     }
 
     // MARK: - View

@@ -20,7 +20,8 @@ struct NetworkActivityIndicatorReducer: Reducer {
     // MARK: - Actions
 
     enum Action {
-        case backgroundColorChanged(Color?)
+        case healthChanged
+        case hideIfInactive
         case hideIndicator
         case indicatorTapped
         case isVisibleChanged(Bool)
@@ -36,6 +37,7 @@ struct NetworkActivityIndicatorReducer: Reducer {
         /* MARK: Types */
 
         enum TaskID {
+            case hideIfInactive
             case hideIndicator
         }
 
@@ -63,8 +65,14 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
     func reduce(into state: inout State, action: Action) -> Effect<Action> {
         switch action {
-        case let .backgroundColorChanged(color):
-            state.backgroundColor = color
+        case .healthChanged:
+            state.backgroundColor = Networking
+                .config
+                .activityIndicatorDelegate
+                .backgroundColor
+
+        case .hideIfInactive:
+            return hideIndicatorEffect
 
         case .hideIndicator:
             guard state.isVisible else { return .none }
@@ -94,25 +102,53 @@ struct NetworkActivityIndicatorReducer: Reducer {
                 return true
             }
 
-            // TODO: Should probably use Task.debounced for this.
-            var hideIndicatorTask: Effect<Action> {
-                .cancel(id: State.TaskID.hideIndicator)
-                    .merge(
-                        with:
-                        .task(delay: .seconds(State.Floats.hideIndicatorTaskDelaySeconds)) {
-                            .hideIndicator
-                        }
-                        .cancellable(id: State.TaskID.hideIndicator)
-                    )
+            var activityChangeEffects: Effect<Action> {
+                var effects = [
+                    hideIfInactiveEffect,
+                    hideIndicatorEffect,
+                ]
+
+                if canShowIndicator {
+                    effects.append(.fireAndForget { @MainActor in
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    })
+                }
+
+                return .merge(effects)
             }
 
             guard isVisible,
-                  state.isVisible != canShowIndicator else { return hideIndicatorTask }
+                  state.isVisible != canShowIndicator else { return activityChangeEffects }
             state.isVisible = canShowIndicator
             state.yOffset = canShowIndicator ? 0 : State.Floats.hiddenYOffset
-            return hideIndicatorTask
+            return activityChangeEffects
         }
 
         return .none
+    }
+
+    // MARK: - Auxiliary
+
+    private var hideIfInactiveEffect: Effect<Action> {
+        .task(delay: .seconds(State.Floats.hideIfInactiveTaskDelaySeconds)) {
+            guard !Shared.isNetworkActivityOccurring.value else { return nil }
+            return .hideIfInactive
+        }
+        .cancellable(
+            id: State.TaskID.hideIfInactive,
+            cancelInFlight: true
+        )
+    }
+
+    // TODO: Should probably use Task.debounced for this.
+    private var hideIndicatorEffect: Effect<Action> {
+        .cancel(id: State.TaskID.hideIndicator)
+            .merge(
+                with:
+                .task(delay: .seconds(State.Floats.hideIndicatorTaskDelaySeconds)) {
+                    .hideIndicator
+                }
+                .cancellable(id: State.TaskID.hideIndicator)
+            )
     }
 }

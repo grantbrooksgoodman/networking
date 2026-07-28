@@ -22,6 +22,7 @@ extension AppConstants.CGFloats {
         static let glassEffectTintOpacity: CGFloat = 0.5
 
         static let hiddenYOffset: CGFloat = -1000
+        static let hideIfInactiveTaskDelaySeconds: CGFloat = 2
         static let hideIndicatorTaskDelaySeconds: CGFloat = 1.25
 
         static let padding: CGFloat = 5

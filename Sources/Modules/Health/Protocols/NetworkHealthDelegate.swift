@@ -24,7 +24,7 @@ import Foundation
 ///
 /// Read the current value synchronously through the delegate's
 /// ``health`` property, or observe changes through
-/// `Observables.networkHealth`:
+/// `Shared.networkHealth.changes`:
 ///
 /// ```swift
 /// @Dependency(\.networking.health) var health: NetworkHealthDelegate

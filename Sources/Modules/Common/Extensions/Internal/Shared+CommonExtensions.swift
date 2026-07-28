@@ -1,5 +1,5 @@
 //
-//  Observables+CommonExtensions.swift
+//  Shared+CommonExtensions.swift
 //
 //  Created by Grant Brooks Goodman.
 //  Copyright © NEOTechnica Corporation. All rights reserved.
@@ -11,6 +11,6 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-extension Observables {
-    static let isNetworkActivityOccurring = Observable<Bool>(false)
+extension Shared {
+    static let isNetworkActivityOccurring = SharedState<Bool>(false)
 }

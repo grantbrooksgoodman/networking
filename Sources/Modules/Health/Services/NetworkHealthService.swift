@@ -318,7 +318,7 @@ struct NetworkHealthService: NetworkHealthDelegate {
     private func publish(_ health: NetworkHealth) {
         let previousTier = _health.wrappedValue.tier
         _health.wrappedValue = health
-        Observables.networkHealth.value = health
+        Shared.networkHealth.value = health
 
         guard previousTier != health.tier else { return }
         Logger.log(

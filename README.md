@@ -109,7 +109,7 @@ Networking relies on AppSubsystem for its core infrastructure. The table below s
 |---|---|
 | Dependency injection (`@Dependency`) | Exposes all networking services through the shared dependency graph. Your code accesses services using `@Dependency(\.networking)`. |
 | Persistence (`@Persistent`) | Persists the active network environment and indicator state across launches using strongly typed storage keys. |
-| Reactive observation (`Observable`) | Publishes network activity and network health state for cross-feature observation. |
+| Reactive observation (`SharedState`) | Publishes network activity and network health state for cross-feature observation. |
 | Logging (`Logger`, `LoggerDomain`) | Logs operations across database, storage, and translation modules using scoped logger domains. |
 | Caching (`CacheDomain`) | Registers networking-specific cache domains that integrate with the system-wide cache clearing provided by AppSubsystem. |
 | Developer tools (`DevModeService`) | Registers Developer Mode actions for switching environments and toggling the network activity indicator in pre-release builds. |
@@ -715,27 +715,21 @@ let currentHealth = health.health
 
 #### Observing Changes
 
-For views that need to react to health changes, include `Observables.networkHealth` in your observer's `observedValues` and handle updates in `onChange(of:)`, following the standard AppSubsystem `Observer` pattern:
+`Shared.networkHealth` is an AppSubsystem `SharedState` whose `changes` stream yields the current health immediately upon subscription, then each subsequent change. For views that need to react to health changes, subscribe the view model with `observing(_:_:)`, mapping each value to a reducer action:
 
 ```swift
-struct MyObserver: Observer {
-    typealias R = MyReducer
+viewModel.observing(Shared.networkHealth.changes) { .networkHealthChanged($0) }
+```
 
-    let observedValues: [any ObservableProtocol] = [Observables.networkHealth]
-    let viewModel: ViewModel<MyReducer>
+Consumers without a view lifetime, such as services, iterate the stream directly:
 
-    func onChange(of observable: Observable<Any>) {
-        switch observable {
-        case Observables.networkHealth:
-            guard let health = observable.value as? NetworkHealth else { return }
-            send(.networkHealthChanged(health))
-        default: ()
-        }
-    }
+```swift
+for await health in Shared.networkHealth.changes {
+    // React to health changes.
 }
 ```
 
-When you only need the current value – for example, to make a branching decision in a service – read it directly from the delegate without setting up an observer.
+When you only need the current value – for example, to make a branching decision in a service – read it directly from the delegate without subscribing.
 
 #### Configuration
 

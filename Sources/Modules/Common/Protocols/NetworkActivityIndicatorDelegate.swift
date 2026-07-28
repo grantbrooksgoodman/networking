@@ -91,14 +91,14 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
     /// Shows the network activity indicator.
     public func show() {
         Task { @MainActor in
-            Observables.isNetworkActivityOccurring.value = true
+            Shared.isNetworkActivityOccurring.value = true
         }
     }
 
     /// Hides the network activity indicator.
     public func hide() {
         Task { @MainActor in
-            Observables.isNetworkActivityOccurring.value = false
+            Shared.isNetworkActivityOccurring.value = false
         }
     }
 }
