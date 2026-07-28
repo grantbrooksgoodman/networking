@@ -70,7 +70,7 @@ final class CoreStorage: @unchecked Sendable {
         let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
         let resolvedGlobalRawValue = globalCacheStrategy.map(\.resolved.rawValue) ?? ""
 
-        return try await Self.coalescer(
+        let callback = await Self.coalescer.submitUnlessCancelled(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
@@ -98,7 +98,15 @@ final class CoreStorage: @unchecked Sendable {
             } catch {
                 return .failure(error)
             }
-        }.get()
+        }
+
+        guard let callback else {
+            throw .cancelled(
+                metadata: .init(sender: self)
+            )
+        }
+
+        return try callback.get()
     }
 
     private func _performOperation(
@@ -119,7 +127,7 @@ final class CoreStorage: @unchecked Sendable {
                         atPath: path,
                         includeItemsInSubdirectories: includeItemsInSubdirectories
                     ):
-                        try await deleteAllItems(
+                        try await self.deleteAllItems(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                             includeItemsInSubdirectories: includeItemsInSubdirectories
                         )
@@ -127,7 +135,7 @@ final class CoreStorage: @unchecked Sendable {
                     case let .deleteItem(
                         atPath: path
                     ):
-                        try await deleteItem(
+                        try await self.deleteItem(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path
                         )
 
@@ -137,11 +145,11 @@ final class CoreStorage: @unchecked Sendable {
                         includeItemsInSubdirectories: includeItemsInSubdirectories,
                         cacheStrategy: cacheStrategy
                     ):
-                        try await downloadAllItems(
+                        try await self.downloadAllItems(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                             toDirectory: localDirectory,
                             includeItemsInSubdirectories: includeItemsInSubdirectories,
-                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                            cacheStrategy: (self.globalCacheStrategy ?? cacheStrategy).resolved
                         )
 
                     case let .downloadItem(
@@ -149,16 +157,16 @@ final class CoreStorage: @unchecked Sendable {
                         toLocalPath: localPath,
                         cacheStrategy: cacheStrategy
                     ):
-                        try await downloadItem(
+                        try await self.downloadItem(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                             to: localPath,
-                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                            cacheStrategy: (self.globalCacheStrategy ?? cacheStrategy).resolved
                         )
 
                     case let .enumerateEmptyDirectories(
                         startingAt: path
                     ):
-                        try await enumerateEmptyDirectories(
+                        try await self.enumerateEmptyDirectories(
                             startingAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
                         )
 
@@ -166,7 +174,7 @@ final class CoreStorage: @unchecked Sendable {
                         atPath: path,
                         firstResultOnly: firstResultOnly
                     ):
-                        try await getDirectoryListing(
+                        try await self.getDirectoryListing(
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
                             firstResultOnly: firstResultOnly
                         )
@@ -176,16 +184,16 @@ final class CoreStorage: @unchecked Sendable {
                         atPath: path,
                         cacheStrategy: cacheStrategy
                     ):
-                        try await itemExists(
+                        try await self.itemExists(
                             as: itemType,
                             at: prependingEnvironment ? path.prependingCurrentEnvironment : path,
-                            cacheStrategy: (globalCacheStrategy ?? cacheStrategy).resolved
+                            cacheStrategy: (self.globalCacheStrategy ?? cacheStrategy).resolved
                         )
 
                     case let .sizeInKilobytes(
                         ofItemAtPath: path
                     ):
-                        try await sizeInKilobytes(
+                        try await self.sizeInKilobytes(
                             ofItemAt: prependingEnvironment ? path.prependingCurrentEnvironment : path
                         )
 
@@ -193,7 +201,7 @@ final class CoreStorage: @unchecked Sendable {
                         data,
                         metadata: metadata
                     ):
-                        try await upload(
+                        try await self.upload(
                             data,
                             metadata: metadata,
                             prependingEnvironment: prependingEnvironment

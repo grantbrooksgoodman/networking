@@ -65,6 +65,15 @@ enum GuardedOperation {
     /// health sample first when
     /// `recordsCensoredSampleOnTimeout` is `true`.
     ///
+    /// Cancellation is cooperative: if the calling task is
+    /// cancelled – on entry, in which case the body is
+    /// never invoked, or while awaiting settlement – the
+    /// operation throws a cancellation `Exception`
+    /// immediately. The in-flight work itself is never
+    /// interrupted; it continues until it settles or times
+    /// out, with late results absorbed by the
+    /// single-settlement guard.
+    ///
     /// - Parameters:
     ///   - duration: The maximum time to wait before the
     ///     operation times out.
@@ -84,27 +93,36 @@ enum GuardedOperation {
     /// - Returns: The value the body settled with.
     ///
     /// - Throws: An `Exception` if a precondition fails,
-    ///   the timeout elapses, or the body settles with a
-    ///   failure.
+    ///   the timeout elapses, the calling task is
+    ///   cancelled, or the body settles with a failure.
     @discardableResult
     static func run(
         timeout duration: Duration,
         recordsCensoredSampleOnTimeout: Bool,
         showsActivityIndicator: Bool,
         sender: any Sendable,
-        _ body: (
+        _ body: @escaping @Sendable (
             _ healthToken: HealthSampleToken,
             _ settle: @Sendable @escaping (Result<Any?, Exception>) -> Void
         ) -> Void
     ) async throws(Exception) -> Any? {
-        try checkPreconditions(sender: sender)
+        guard !Task.isCancelled else {
+            throw .cancelled(
+                metadata: .init(sender: sender)
+            )
+        }
 
+        try checkPreconditions(sender: sender)
         if showsActivityIndicator {
             Networking.config.activityIndicatorDelegate.show()
         }
 
-        do {
-            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any?, any Error>) in
+        // The settlement flow runs in its own task so that a
+        // cancelled caller can abandon the wait; the timeout bounds
+        // the task's lifetime regardless of whether anyone is still
+        // awaiting it.
+        let operationTask = Task {
+            await withCheckedContinuation { (continuation: CheckedContinuation<LockIsolated<Result<Any?, Exception>>, Never>) in
                 @LockIsolated var didSettle = false
                 var canSettle: Bool {
                     $didSettle.withValue {
@@ -129,10 +147,12 @@ enum GuardedOperation {
                         )
                     }
 
+                    let timedOutResult: Result<Any?, Exception> = .failure(.timedOut(
+                        metadata: .init(sender: sender)
+                    ))
+
                     continuation.resume(
-                        throwing: Exception.timedOut(
-                            metadata: .init(sender: sender)
-                        )
+                        returning: LockIsolated(timedOutResult)
                     )
                 }
 
@@ -144,22 +164,21 @@ enum GuardedOperation {
                         Networking.config.activityIndicatorDelegate.hide()
                     }
 
-                    switch result {
-                    case let .success(value):
-                        // LockIsolated transfer satisfies resume's `sending` requirement.
-                        continuation.resume(returning: LockIsolated(value).wrappedValue)
-                    case let .failure(exception):
-                        continuation.resume(throwing: exception)
-                    }
+                    // LockIsolated transfer satisfies resume's `sending` requirement.
+                    continuation.resume(returning: LockIsolated(result))
                 }
             }
-        } catch let error as Exception {
-            throw error
-        } catch {
-            throw Exception(
-                error,
+        }
+
+        guard let result = try? await operationTask.abandonableValue() else {
+            throw .cancelled(
                 metadata: .init(sender: sender)
             )
+        }
+
+        switch result.wrappedValue {
+        case let .success(value): return value
+        case let .failure(exception): throw exception
         }
     }
 }
