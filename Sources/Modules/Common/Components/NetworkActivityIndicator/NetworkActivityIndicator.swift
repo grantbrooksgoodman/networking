@@ -32,9 +32,16 @@ struct NetworkActivityIndicator: View {
                     // Dropping the first element skips the replayed current
                     // value; activity effects should only run for changes
                     // occurring after subscription.
-                    Shared.isNetworkActivityOccurring.changes.dropFirst()
+                    SharedState(\.isNetworkActivityOccurring)
+                        .projectedValue
+                        .changes
+                        .dropFirst()
                 ) { .isVisibleChanged($0) }
-                .observing(Shared.networkHealth.changes) { _ in .healthChanged }
+                .observing(
+                    SharedState(\.networkHealth)
+                        .projectedValue
+                        .changes
+                ) { _ in .healthChanged }
         )
     }
 

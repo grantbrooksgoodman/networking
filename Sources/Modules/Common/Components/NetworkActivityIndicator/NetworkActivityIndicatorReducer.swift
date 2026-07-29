@@ -131,7 +131,8 @@ struct NetworkActivityIndicatorReducer: Reducer {
 
     private var hideIfInactiveEffect: Effect<Action> {
         .task(delay: .seconds(State.Floats.hideIfInactiveTaskDelaySeconds)) {
-            guard !Shared.isNetworkActivityOccurring.value else { return nil }
+            guard !SharedState(\.isNetworkActivityOccurring)
+                .wrappedValue else { return nil }
             return .hideIfInactive
         }
         .cancellable(

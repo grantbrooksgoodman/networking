@@ -34,6 +34,8 @@ struct NetworkHealthService: NetworkHealthDelegate {
     private let radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
     private let _health = LockIsolated<NetworkHealth>(.unknown)
 
+    @SharedState(\.networkHealth) private var networkHealth
+
     // MARK: - Computed Properties
 
     var health: NetworkHealth {
@@ -318,7 +320,7 @@ struct NetworkHealthService: NetworkHealthDelegate {
     private func publish(_ health: NetworkHealth) {
         let previousTier = _health.wrappedValue.tier
         _health.wrappedValue = health
-        Shared.networkHealth.value = health
+        networkHealth = health
 
         guard previousTier != health.tier else { return }
         Logger.log(

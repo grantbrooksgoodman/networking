@@ -1,5 +1,5 @@
 //
-//  Shared+CommonExtensions.swift
+//  SharedStates+CommonExtensions.swift
 //
 //  Created by Grant Brooks Goodman.
 //  Copyright © NEOTechnica Corporation. All rights reserved.
@@ -11,6 +11,8 @@ import Foundation
 /* Proprietary */
 import AppSubsystem
 
-extension Shared {
-    static let isNetworkActivityOccurring = SharedState<Bool>(false)
+extension SharedStates {
+    var isNetworkActivityOccurring: StateStream<Bool> {
+        state(false)
+    }
 }
