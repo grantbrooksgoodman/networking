@@ -7,6 +7,9 @@
 
 /* Native */
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /* Proprietary */
 import AppSubsystem
@@ -19,6 +22,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     @Dependency(\.build) private var build: Build
     @Dependency(\.networking.database) private var database: DatabaseDelegate
     @Dependency(\.translationArchiverDelegate) private var localTranslationArchiver: TranslationArchiverDelegate
+    @Dependency(\.notificationCenter) private var notificationCenter: NotificationCenter
 
     // MARK: - Types
 
@@ -31,24 +35,24 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     @LockIsolated private var state = State()
 
+    // MARK: - Computed Properties
+
+    private var hasFreshTranslationDataSnapshot: Bool {
+        $state.translationDataSample != .empty &&
+            !$state.translationDataSample.isExpired
+    }
+
     // MARK: - Init
 
     init() {
-        Task.background(delayedBy: .seconds(10)) { [weak self] in
-            do throws(Exception) {
-                try await self?.populateTranslationDataSnapshot(
-                    expiryThreshold: .seconds(300)
-                )
+        registerForegroundRefreshObserver()
 
-                Logger.log(
-                    "Populated translation data snapshot.",
-                    domain: .Networking.hostedTranslation,
-                    sender: self ?? HostedTranslationArchiver.self
-                )
-            } catch {
-                Logger.log(
-                    error,
-                    domain: .Networking.hostedTranslation
+        Task.background(delayedBy: .seconds(10)) { [weak self] in
+            while true {
+                await self?.refreshTranslationDataSnapshot(forced: true)
+                guard self != nil else { return }
+                try await Task.sleep(
+                    for: TranslationConstants.translationDataSampleRefreshInterval
                 )
             }
         }
@@ -64,18 +68,14 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             metadata: .init(sender: self)
         )
 
-        guard !translation.languagePair.isIdempotent,
-              let referenceValue = translation.reference.type.value else {
+        guard let entry = hostedArchiveEntry(for: translation) else {
             throw Exception(
                 "Translation language pair is idempotent; ineligible for hosted archive.",
                 metadata: .init(sender: self)
             )
         }
 
-        try await database.updateChildValues(
-            forKey: "\(NetworkPath.translations.rawValue)/\(translation.languagePair.string)",
-            with: [translation.reference.type.key: referenceValue]
-        )
+        try await database.commit([entry.key: entry.value])
 
         Logger.log(
             .init(
@@ -88,15 +88,62 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         )
     }
 
+    func hostedArchiveEntry(
+        for translation: Translation
+    ) -> (key: String, value: Any)? {
+        do {
+            try TranslationValidator.validate(
+                translation: translation,
+                metadata: .init(sender: self)
+            )
+        } catch {
+            return nil
+        }
+
+        guard !translation.languagePair.isIdempotent,
+              let referenceValue = translation.reference.type.value else { return nil }
+
+        let key = [
+            NetworkPath.translations.rawValue,
+            translation.languagePair.string,
+            translation.reference.type.key,
+        ].joined(separator: "/")
+
+        return (key: key, value: referenceValue)
+    }
+
     // MARK: - Find Archived Translations
 
     nonisolated(nonsending) func findArchivedTranslation(
         input: TranslationInput,
         languagePair: LanguagePair
     ) async throws(Exception) -> Translation {
+        let inputValueEncodedHash = input.value.encodedHash
+
+        // With a fresh snapshot, absence is authoritative here; skip the per-hash network read.
+        if hasFreshTranslationDataSnapshot {
+            try TranslationValidator.validate(
+                languagePair: languagePair,
+                metadata: .init(sender: self)
+            )
+
+            if let archivedTranslation = archivedTranslationFromSnapshot(
+                id: inputValueEncodedHash,
+                languagePair: languagePair
+            ) {
+                return archivedTranslation
+            }
+
+            return try await deriveTranslation(
+                input: input,
+                inputValueEncodedHash: inputValueEncodedHash,
+                languagePair: languagePair
+            )
+        }
+
         do {
             return try await findArchivedTranslation(
-                id: input.value.encodedHash,
+                id: inputValueEncodedHash,
                 languagePair: languagePair
             )
         } catch {
@@ -105,7 +152,7 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             ) else { throw error }
             return try await deriveTranslation(
                 input: input,
-                inputValueEncodedHash: input.value.encodedHash,
+                inputValueEncodedHash: inputValueEncodedHash,
                 languagePair: languagePair
             )
         }
@@ -127,23 +174,12 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             throw error.appending(userInfo: userInfo)
         }
 
-        if $state.translationDataSample != .empty,
-           !$state.translationDataSample.isExpired,
-           let dataForLanguagePair = $state
-           .translationDataSample
-           .data
-           .first(where: { $0.key == languagePair.string })?
-           .value as? [String: String],
-           let components = dataForLanguagePair
-           .first(where: { $0.key == inputValueEncodedHash })?
-           .value
-           .decodedTranslationComponents {
-            // NIT: Theoretically, we should have these in the archive already.
-            return .init(
-                input: .init(components.input),
-                output: components.output,
-                languagePair: languagePair
-            )
+        // NIT: Theoretically, we should have these in the archive already.
+        if let archivedTranslation = archivedTranslationFromSnapshot(
+            id: inputValueEncodedHash,
+            languagePair: languagePair
+        ) {
+            return archivedTranslation
         }
 
         let translationDataString: String
@@ -197,48 +233,64 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
     // MARK: - Auxiliary
 
+    private func archivedTranslationFromSnapshot(
+        id inputValueEncodedHash: String,
+        languagePair: LanguagePair
+    ) -> Translation? {
+        guard hasFreshTranslationDataSnapshot,
+              let dataForLanguagePair = $state.translationDataSample.data[languagePair.string] as? [String: String],
+              let components = dataForLanguagePair[inputValueEncodedHash]?.decodedTranslationComponents else { return nil }
+
+        return .init(
+            input: .init(components.input),
+            output: components.output,
+            languagePair: languagePair
+        )
+    }
+
     private nonisolated(nonsending) func deriveTranslation(
         input originalInput: TranslationInput?,
         inputValueEncodedHash originalInputHash: String,
         languagePair originalLanguagePair: LanguagePair
     ) async throws(Exception) -> Translation {
-        try await populateTranslationDataSnapshot(expiryThreshold: .seconds(120))
+        // Derivation consults only in-memory data; an empty or expired snapshot fails fast.
+        if hasFreshTranslationDataSnapshot {
+            for (archivedLanguagePairData, archivedTranslationData) in $state.translationDataSample.data {
+                guard let archivedLanguagePair = LanguagePair(archivedLanguagePairData),
+                      let sourceLanguageTranslationData = archivedTranslationData as? [String: String],
+                      let sourceLanguageTranslation = sourceLanguageTranslationData.first(where: { $0.key == originalInputHash }),
+                      let sourceLanguageTranslationComponents = sourceLanguageTranslation.value.decodedTranslationComponents,
+                      let targetLanguageTranslationData = $state.translationDataSample.data["\(archivedLanguagePair.to)-\(originalLanguagePair.to)"],
+                      let targetLanguageTranslation = targetLanguageTranslationData[sourceLanguageTranslationComponents.output.encodedHash] as? String,
+                      let targetLanguageTranslationComponents = targetLanguageTranslation.decodedTranslationComponents else { continue }
 
-        for (archivedLanguagePairData, archivedTranslationData) in $state.translationDataSample.data {
-            guard let archivedLanguagePair = LanguagePair(archivedLanguagePairData),
-                  let sourceLanguageTranslationData = archivedTranslationData as? [String: String],
-                  let sourceLanguageTranslation = sourceLanguageTranslationData.first(where: { $0.key == originalInputHash }),
-                  let sourceLanguageTranslationComponents = sourceLanguageTranslation.value.decodedTranslationComponents,
-                  let targetLanguageTranslationData = $state.translationDataSample.data["\(archivedLanguagePair.to)-\(originalLanguagePair.to)"],
-                  let targetLanguageTranslation = targetLanguageTranslationData[sourceLanguageTranslationComponents.output.encodedHash] as? String,
-                  let targetLanguageTranslationComponents = targetLanguageTranslation.decodedTranslationComponents else { continue }
+                let derivedTranslation = Translation(
+                    input: .init(originalInput?.value ?? sourceLanguageTranslationComponents.input),
+                    output: targetLanguageTranslationComponents.output,
+                    languagePair: originalLanguagePair
+                )
 
-            let derivedTranslation = Translation(
-                input: .init(originalInput?.value ?? sourceLanguageTranslationComponents.input),
-                output: targetLanguageTranslationComponents.output,
-                languagePair: originalLanguagePair
-            )
+                if !derivedTranslation.languagePair.isIdempotent {
+                    try await addToHostedArchive(derivedTranslation)
+                }
 
-            if !derivedTranslation.languagePair.isIdempotent {
-                try await addToHostedArchive(derivedTranslation)
+                Logger.log(
+                    .init(
+                        "Successfully derived translation from existing data.",
+                        isReportable: false,
+                        userInfo: [
+                            "IntermediateLanguagePair": archivedLanguagePair.string,
+                            "SynthesisLanguagePair": "\(archivedLanguagePair.to)-\(originalLanguagePair.to)",
+                            "TargetLanguagePair": originalLanguagePair.string,
+                        ],
+                        metadata: .init(sender: self)
+                    ),
+                    domain: .Networking.hostedTranslation,
+                    with: .toastInPrerelease(style: .success)
+                )
+
+                return derivedTranslation
             }
-
-            Logger.log(
-                .init(
-                    "Successfully derived translation from existing data.",
-                    isReportable: false,
-                    userInfo: [
-                        "IntermediateLanguagePair": archivedLanguagePair.string,
-                        "SynthesisLanguagePair": "\(archivedLanguagePair.to)-\(originalLanguagePair.to)",
-                        "TargetLanguagePair": originalLanguagePair.string,
-                    ],
-                    metadata: .init(sender: self)
-                ),
-                domain: .Networking.hostedTranslation,
-                with: .toastInPrerelease(style: .success)
-            )
-
-            return derivedTranslation
         }
 
         throw Exception(
@@ -247,11 +299,10 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         )
     }
 
-    private nonisolated(nonsending) func populateTranslationDataSnapshot(
-        expiryThreshold: Duration
-    ) async throws(Exception) {
+    private nonisolated(nonsending) func populateTranslationDataSnapshot(forced: Bool) async throws(Exception) {
         let shouldProceed = $state.withValue { state in
             guard !state.isPopulating,
+                  forced ||
                   state.translationDataSample.isExpired ||
                   state.translationDataSample == .empty else { return false }
             state.isPopulating = true
@@ -273,10 +324,16 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         $state.withValue {
             $0.translationDataSample = TranslationDataSample(
                 data: translationData,
-                expiresAfter: expiryThreshold
+                expiresAfter: TranslationConstants.translationDataSampleExpiryThreshold
             )
             $0.isPopulating = false
         }
+
+        Logger.log(
+            "Populated translation data snapshot.",
+            domain: .Networking.hostedTranslation,
+            sender: self
+        )
 
         Task.detached(priority: .background) { [weak self] in
             guard let self else { return }
@@ -315,5 +372,31 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             CoreDatabaseStore.addValues(dataSamples)
             localTranslationArchiver.addValues(translations)
         }
+    }
+
+    private nonisolated(nonsending) func refreshTranslationDataSnapshot(forced: Bool) async {
+        do throws(Exception) {
+            try await populateTranslationDataSnapshot(forced: forced)
+        } catch {
+            Logger.log(
+                error,
+                domain: .Networking.hostedTranslation
+            )
+        }
+    }
+
+    private func registerForegroundRefreshObserver() {
+        #if canImport(UIKit)
+        _ = notificationCenter.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task.background {
+                await self.refreshTranslationDataSnapshot(forced: false)
+            }
+        }
+        #endif
     }
 }

@@ -77,6 +77,14 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         )
     }
 
+    // MARK: - Hosted Archive Entry
+
+    func hostedArchiveEntry(
+        for translation: Translation
+    ) -> (key: String, value: Any)? {
+        archiver.hostedArchiveEntry(for: translation)
+    }
+
     // MARK: - Label String Resolution
 
     func resolve(
@@ -137,7 +145,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     do throws(Exception) {
                         if let translation = try await self.prevalidateInput(
                             input,
-                            languagePair: languagePair
+                            languagePair: languagePair,
+                            archiveStrategy: .immediate
                         ) {
                             return (index, .success(.archiveHit(translation)))
                         }
@@ -230,7 +239,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                         let processedTranslation = try await self.postProcess(
                             translation,
                             enhancementConfig: enhancementConfig,
-                            archiveTreatment: .addToBothArchives
+                            archiveTreatment: .addToBothArchives,
+                            archiveStrategy: .immediate
                         )
                         return (slotIndex, .success(processedTranslation))
                     } catch {
@@ -275,11 +285,13 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
-        enhance enhancementConfig: EnhancementConfiguration?
+        enhance enhancementConfig: EnhancementConfiguration?,
+        archive archiveStrategy: ArchiveStrategy
     ) async throws(Exception) -> Translation {
         if let translation = try await prevalidateInput(
             input,
-            languagePair: languagePair
+            languagePair: languagePair,
+            archiveStrategy: archiveStrategy
         ) {
             return translation
         }
@@ -323,7 +335,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     timeout: (.seconds(10), false)
                 ),
                 enhancementConfig: enhancementConfig,
-                archiveTreatment: .addToBothArchives
+                archiveTreatment: .addToBothArchives,
+                archiveStrategy: archiveStrategy
             )
         } catch {
             guard error.isEqual(toAny: [
@@ -340,7 +353,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     languagePair: languagePair
                 ),
                 enhancementConfig: enhancementConfig,
-                archiveTreatment: .addToBothArchives
+                archiveTreatment: .addToBothArchives,
+                archiveStrategy: archiveStrategy
             )
         }
     }
@@ -394,14 +408,16 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
         return try await postProcess(
             translation,
             enhancementConfig: nil,
-            archiveTreatment: .addToLocalArchive
+            archiveTreatment: .addToLocalArchive,
+            archiveStrategy: .immediate
         )
     }
 
     private func postProcess(
         _ translation: Translation,
         enhancementConfig: EnhancementConfiguration?,
-        archiveTreatment: ArchiveTreatment?
+        archiveTreatment: ArchiveTreatment?,
+        archiveStrategy: ArchiveStrategy
     ) async throws(Exception) -> Translation {
         var translation = translation
 
@@ -467,8 +483,9 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             metadata: .init(sender: self)
         )
 
-        if archiveTreatment == .addToBothArchives ||
-            archiveTreatment == .addToHostedArchive {
+        if archiveStrategy == .immediate,
+           archiveTreatment == .addToBothArchives ||
+           archiveTreatment == .addToHostedArchive {
             try await archiver.addToHostedArchive(translation)
         }
 
@@ -482,7 +499,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
 
     private func prevalidateInput(
         _ input: TranslationInput,
-        languagePair: LanguagePair
+        languagePair: LanguagePair,
+        archiveStrategy: ArchiveStrategy
     ) async throws(Exception) -> Translation? {
         try TranslationValidator.validate(
             inputs: [input],
@@ -502,7 +520,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             return try await postProcess(
                 translation,
                 enhancementConfig: nil,
-                archiveTreatment: nil
+                archiveTreatment: nil,
+                archiveStrategy: archiveStrategy
             )
         }
 
@@ -535,7 +554,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             return try await postProcess(
                 archivedTranslation,
                 enhancementConfig: nil,
-                archiveTreatment: nil
+                archiveTreatment: nil,
+                archiveStrategy: archiveStrategy
             )
         }
 
@@ -555,7 +575,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
                     languagePair: languagePair
                 ),
                 enhancementConfig: nil,
-                archiveTreatment: .addToBothArchives
+                archiveTreatment: .addToBothArchives,
+                archiveStrategy: archiveStrategy
             )
         }
 

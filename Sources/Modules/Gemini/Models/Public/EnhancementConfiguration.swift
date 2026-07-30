@@ -11,7 +11,7 @@ import Foundation
 /// Configuration options for AI-enhanced translations.
 ///
 /// Pass an `EnhancementConfiguration` to
-/// ``HostedTranslationDelegate/translate(_:with:hud:enhance:)``
+/// ``HostedTranslationDelegate/translate(_:with:hud:enhance:archive:)``
 /// or
 /// ``HostedTranslationDelegate/getTranslations(for:languagePair:hud:enhance:)``
 /// to enhance translations using the Gemini API:
@@ -39,6 +39,7 @@ public struct EnhancementConfiguration: Sendable {
     let maximumOutputTokens: Int
     let model: GeminiModel
     let temperature: Double
+    let thinkingBudget: Int
 
     // MARK: - Init
 
@@ -55,6 +56,13 @@ public struct EnhancementConfiguration: Sendable {
     ///   - temperature: The sampling temperature for
     ///     generation. Lower values produce more
     ///     deterministic results. The default is `0.0`.
+    ///   - thinkingBudget: The number of tokens the
+    ///     model may spend reasoning before responding.
+    ///     The default is `0`, which disables reasoning
+    ///     for the lowest possible latency. Pass `-1`
+    ///     to let the model decide dynamically. Has no
+    ///     effect on models without reasoning support,
+    ///     such as ``GeminiModel/flash20``.
     ///   - additionalContext: Optional context to guide
     ///     the enhancement, such as domain-specific
     ///     terminology.
@@ -62,11 +70,13 @@ public struct EnhancementConfiguration: Sendable {
         model: GeminiModel = .flash25,
         maximumOutputTokens: Int = 256,
         temperature: Double = 0.0,
+        thinkingBudget: Int = 0,
         additionalContext: String?
     ) {
         self.model = model
         self.maximumOutputTokens = maximumOutputTokens
         self.temperature = temperature
+        self.thinkingBudget = thinkingBudget
         self.additionalContext = additionalContext
     }
 }

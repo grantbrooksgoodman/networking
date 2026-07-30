@@ -333,6 +333,33 @@ public protocol StorageDelegate: Sendable {
         timeout duration: Duration
     ) async throws(Exception)
 
+    /// Uploads the file at the specified local URL to
+    /// hosted storage with the specified metadata.
+    ///
+    /// Use this method instead of
+    /// ``upload(_:metadata:prependingEnvironment:timeout:)``
+    /// for large files. The file streams from disk rather
+    /// than being loaded into memory in its entirety.
+    ///
+    /// - Parameters:
+    ///   - fileURL: The local file URL of the file to
+    ///     upload.
+    ///   - metadata: The metadata describing the
+    ///     destination path and optional HTTP headers.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the metadata's file path.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out.
+    ///
+    /// - Throws: An ``Exception`` if the upload fails.
+    func upload(
+        fileAt fileURL: URL,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async throws(Exception)
+
     /// Uploads data to hosted storage with the specified
     /// metadata, reporting transfer progress.
     ///
@@ -789,6 +816,41 @@ public extension StorageDelegate {
     ) async throws(Exception) {
         try await upload(
             data,
+            metadata: metadata,
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
+    /// Uploads the file at the specified local URL to
+    /// hosted storage with the specified metadata.
+    ///
+    /// This method calls
+    /// ``upload(fileAt:metadata:prependingEnvironment:timeout:)``
+    /// with default parameter values.
+    ///
+    /// - Parameters:
+    ///   - fileURL: The local file URL of the file to
+    ///     upload.
+    ///   - metadata: The metadata describing the
+    ///     destination path and optional HTTP headers.
+    ///   - prependingEnvironment: A Boolean value that
+    ///     determines whether the active environment is
+    ///     prepended to the metadata's file path. The
+    ///     default is `true`.
+    ///   - duration: The maximum time to wait before the
+    ///     operation times out. The default is 10
+    ///     seconds.
+    ///
+    /// - Throws: An ``Exception`` if the upload fails.
+    func upload(
+        fileAt fileURL: URL,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool = true,
+        timeout duration: Duration = Networking.defaultOperationTimeout
+    ) async throws(Exception) {
+        try await upload(
+            fileAt: fileURL,
             metadata: metadata,
             prependingEnvironment: prependingEnvironment,
             timeout: duration

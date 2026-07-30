@@ -61,6 +61,11 @@ enum StorageOperation: EncodedHashable {
         metadata: HostedItemMetadata
     )
 
+    case uploadFile(
+        atURL: URL,
+        metadata: HostedItemMetadata
+    )
+
     // MARK: - Methods
 
     /// Returns a copy with any ``CacheStrategy/adaptive``
@@ -120,7 +125,8 @@ enum StorageOperation: EncodedHashable {
              .enumerateEmptyDirectories,
              .getDirectoryListing,
              .sizeInKilobytes,
-             .upload:
+             .upload,
+             .uploadFile:
             return self
         }
     }
@@ -201,6 +207,15 @@ enum StorageOperation: EncodedHashable {
         ):
             [
                 data.encodedHash,
+                metadata.encodedHash,
+            ]
+
+        case let .uploadFile(
+            atURL,
+            metadata
+        ):
+            [
+                atURL.absoluteString,
                 metadata.encodedHash,
             ]
         }

@@ -82,6 +82,44 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
         enhance enhancementConfig: EnhancementConfiguration?
     ) async throws(Exception) -> [Translation]
 
+    /// Returns the database fan-out entry for archiving
+    /// the specified translation, without writing it.
+    ///
+    /// Use this method with the
+    /// ``ArchiveStrategy/deferred`` archive strategy to
+    /// merge a translation's hosted-archive write into
+    /// your own atomic ``DatabaseDelegate/commit(_:)``
+    /// payload:
+    ///
+    /// ```swift
+    /// let translation = try await translator.translate(
+    ///     .init("Hello"),
+    ///     with: languagePair,
+    ///     archive: .deferred
+    /// )
+    ///
+    /// if let entry = translator.hostedArchiveEntry(
+    ///     for: translation
+    /// ) {
+    ///     updates[entry.key] = entry.value
+    /// }
+    /// ```
+    ///
+    /// The entry's key is an environment-relative path –
+    /// for example, `"translations/en-es/<hash>"` –
+    /// matching the convention
+    /// ``DatabaseDelegate/commit(_:)`` expects.
+    ///
+    /// - Parameter translation: The translation to build
+    ///   an archive entry for.
+    ///
+    /// - Returns: The archive entry's path and value, or
+    ///   `nil` if the translation's language pair is
+    ///   idempotent or the translation is invalid.
+    func hostedArchiveEntry(
+        for translation: Translation
+    ) -> (key: String, value: Any)?
+
     /// Resolves a set of translatable label strings and
     /// returns their output maps.
     ///
@@ -111,6 +149,9 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
     ///     the HUD and whether it is modal.
     ///   - enhancementConfig: An optional configuration
     ///     for AI-enhanced translation.
+    ///   - archiveStrategy: The strategy that determines
+    ///     when a newly retrieved translation is written
+    ///     to the hosted archive.
     ///
     /// - Returns: The translated value.
     ///
@@ -120,7 +161,8 @@ public protocol HostedTranslationDelegate: AlertKit.TranslationDelegate, Sendabl
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)?,
-        enhance enhancementConfig: EnhancementConfiguration?
+        enhance enhancementConfig: EnhancementConfiguration?,
+        archive archiveStrategy: ArchiveStrategy
     ) async throws(Exception) -> Translation
 }
 
@@ -165,7 +207,7 @@ public extension HostedTranslationDelegate {
     /// language pair.
     ///
     /// This method calls
-    /// ``translate(_:with:hud:enhance:)``
+    /// ``translate(_:with:hud:enhance:archive:)``
     /// with default parameter values.
     ///
     /// - Parameters:
@@ -177,6 +219,10 @@ public extension HostedTranslationDelegate {
     ///   - enhancementConfig: An optional configuration
     ///     for AI-enhanced translation. The default is
     ///     `nil`.
+    ///   - archiveStrategy: The strategy that determines
+    ///     when a newly retrieved translation is written
+    ///     to the hosted archive. The default is
+    ///     ``ArchiveStrategy/immediate``.
     ///
     /// - Returns: The translated value.
     ///
@@ -186,13 +232,15 @@ public extension HostedTranslationDelegate {
         _ input: TranslationInput,
         with languagePair: LanguagePair,
         hud hudConfig: (appearsAfter: Duration, isModal: Bool)? = nil,
-        enhance enhancementConfig: EnhancementConfiguration? = nil
+        enhance enhancementConfig: EnhancementConfiguration? = nil,
+        archive archiveStrategy: ArchiveStrategy = .immediate
     ) async throws(Exception) -> Translation {
         try await translate(
             input,
             with: languagePair,
             hud: hudConfig,
-            enhance: enhancementConfig
+            enhance: enhancementConfig,
+            archive: archiveStrategy
         )
     }
 }

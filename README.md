@@ -695,6 +695,8 @@ let translation = try await hostedTranslation.translate(
 
 The [`GeminiModel`](Sources/Modules/Gemini/Models/Public/GeminiModel.swift) enum defines the available models for enhancement. The default is `flash25`.
 
+> **Note:** For reasoning-capable models such as `flash25`, reasoning is disabled by default (`thinkingBudget: 0`) to minimize enhancement latency. Pass a positive token budget – or `-1` for dynamic reasoning – to `EnhancementConfiguration` to re-enable it.
+
 ### Health
 
 The [`NetworkHealthDelegate`](Sources/Modules/Health/Protocols/NetworkHealthDelegate.swift) protocol provides a passive, continuously updated estimate of network quality. Rather than sending probe requests, the health system observes the latency and throughput of database and storage operations that your app already performs. The only exception is strictly opt-in active probing, described below.
@@ -838,6 +840,12 @@ try await storage.upload(
     metadata: HostedItemMetadata("avatars/user123.png")
 )
 
+// Upload a file, streaming from disk.
+try await storage.upload(
+    fileAt: localFileURL,
+    metadata: HostedItemMetadata("videos/intro.mp4")
+)
+
 // Download an item to a local path.
 try await storage.downloadItem(
     at: "avatars/user123.png",
@@ -849,6 +857,8 @@ let directoryListing = try await storage.getDirectoryListing(
     at: "avatars"
 )
 ```
+
+Prefer the file-URL upload variant for large files – the file streams from disk rather than being loaded into memory in its entirety.
 
 #### Observing Transfer Progress
 
@@ -890,6 +900,24 @@ let translation = try await translator.translate(
 ```
 
 Translations can be serialized for database storage using [`TranslationReference`](Sources/Modules/Translation/Models/Public/TranslationReference.swift), a compact codable form that can later be decoded back into a full translation – either from an inline value, the local archive, or the hosted archive.
+
+New translations are written to the hosted archive within the translate call by default. To merge that write into your own atomic fan-out commit instead, pass [`ArchiveStrategy.deferred`](Sources/Modules/Translation/Models/Public/ArchiveStrategy.swift) to `translate` and obtain the pending entry with `hostedArchiveEntry(for:)`:
+
+```swift
+let translation = try await translator.translate(
+    .init("Hello"),
+    with: languagePair,
+    archive: .deferred
+)
+
+if let entry = translator.hostedArchiveEntry(for: translation) {
+    updates[entry.key] = entry.value
+}
+
+try await database.commit(updates)
+```
+
+The local archive still receives new translations immediately under either strategy.
 
 Use [`TranslationValidator`](Sources/Modules/Translation/Models/Public/TranslationValidator.swift) to check that inputs and language pairs are well-formed before passing them to the translation service.
 

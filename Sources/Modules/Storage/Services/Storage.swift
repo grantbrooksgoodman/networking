@@ -46,6 +46,22 @@ struct Storage: StorageDelegate {
         )
     }
 
+    func upload(
+        fileAt fileURL: URL,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool,
+        timeout duration: Duration
+    ) async throws(Exception) {
+        _ = try await coreStorage.performOperation(
+            .uploadFile(
+                atURL: fileURL,
+                metadata: metadata
+            ),
+            prependingEnvironment: prependingEnvironment,
+            timeout: duration
+        )
+    }
+
     func uploadWithProgress(
         _ data: Data,
         metadata: HostedItemMetadata,

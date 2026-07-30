@@ -14,15 +14,32 @@ extension GeminiRequest {
 
         let maxOutputTokens: Int?
         let temperature: Double?
+        let thinkingConfig: ThinkingConfig?
 
         // MARK: - Init
 
         init(
             maxOutputTokens: Int?,
-            temperature: Double?
+            temperature: Double?,
+            thinkingConfig: ThinkingConfig?
         ) {
             self.maxOutputTokens = maxOutputTokens
             self.temperature = temperature
+            self.thinkingConfig = thinkingConfig
+        }
+    }
+}
+
+extension GeminiRequest.GenerationConfig {
+    struct ThinkingConfig: Encodable {
+        // MARK: - Properties
+
+        let thinkingBudget: Int
+
+        // MARK: - Init
+
+        init(thinkingBudget: Int) {
+            self.thinkingBudget = thinkingBudget
         }
     }
 }

@@ -161,7 +161,8 @@ struct GeminiService {
             contents: [.userPrompt(userPrompt)],
             generationConfig: .init(
                 maxOutputTokens: configuration.maximumOutputTokens,
-                temperature: configuration.temperature
+                temperature: configuration.temperature,
+                thinkingConfig: configuration.model.supportsThinkingConfig ? .init(thinkingBudget: configuration.thinkingBudget) : nil
             )
         )
     }
@@ -200,6 +201,61 @@ struct GeminiService {
         }
     }
 
+    private func getLanguageConfidenceException(
+        for translation: Translation,
+        enhancedOutput: String
+    ) async -> Exception? {
+        let languageRecognitionService = LanguageRecognitionService.shared
+        let targetLanguageCode = translation.languagePair.to
+
+        let enhancedOutputConfidence = await languageRecognitionService.matchConfidence(
+            for: enhancedOutput,
+            inLanguage: targetLanguageCode
+        )
+
+        if enhancedOutputConfidence <= 0.8 {
+            return .init(
+                "Enhanced translation is not confidently in target language.",
+                isReportable: false,
+                userInfo: ["EnhancedTranslationOutput": enhancedOutput],
+                metadata: .init(sender: self)
+            )
+        } else if await enhancedOutputConfidence < languageRecognitionService.matchConfidence(
+            for: translation.output,
+            inLanguage: targetLanguageCode
+        ) {
+            return .init(
+                "Had greater confidence in original output.",
+                isReportable: false,
+                userInfo: [
+                    "EnhancedTranslationOutput": enhancedOutput,
+                    "OriginalTranslationOutput": translation.output,
+                ],
+                metadata: .init(sender: self)
+            )
+        } else if let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last,
+                  let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last,
+                  await languageRecognitionService.matchConfidence(
+                      for: lastEnhancedOutputWord,
+                      inLanguage: targetLanguageCode
+                  ) < languageRecognitionService.matchConfidence(
+                      for: lastOriginalOutputWord,
+                      inLanguage: targetLanguageCode
+                  ) {
+            return .init(
+                "Had greater confidence in last word of original output.",
+                isReportable: false,
+                userInfo: [
+                    "LastEnhancedOutputWord": lastEnhancedOutputWord,
+                    "LastOriginalOutputWord": lastOriginalOutputWord,
+                ],
+                metadata: .init(sender: self)
+            )
+        }
+
+        return nil
+    }
+
     private func getURLRequest(
         for geminiRequest: GeminiRequest,
         apiKey: String,
@@ -215,8 +271,10 @@ struct GeminiService {
         }
 
         var urlRequest = URLRequest(url: url)
+        urlRequest.assumesHTTP3Capable = true
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.timeoutInterval = GeminiConstants.enhancementRequestTimeoutInterval
 
         do {
             urlRequest.httpBody = try jsonEncoder.encode(geminiRequest)
@@ -252,7 +310,6 @@ struct GeminiService {
             throw cachedException
         }
 
-        let languageRecognitionService = LanguageRecognitionService.shared
         let normalizedEnhancedOutput = enhancedOutput.normalized
         let normalizedOriginalInput = translation.input.value.normalized
         let normalizedOriginalOutput = translation.output.normalized
@@ -298,49 +355,12 @@ struct GeminiService {
                 ],
                 metadata: .init(sender: self)
             )
-        } else if await languageRecognitionService.matchConfidence(
-            for: enhancedOutput,
-            inLanguage: translation.languagePair.to
-        ) <= 0.8 {
-            exception = .init(
-                "Enhanced translation is not confidently in target language.",
-                isReportable: false,
-                userInfo: ["EnhancedTranslationOutput": enhancedOutput],
-                metadata: .init(sender: self)
-            )
-        } else if await languageRecognitionService.matchConfidence(
-            for: enhancedOutput,
-            inLanguage: translation.languagePair.to
-        ) < languageRecognitionService.matchConfidence(
-            for: translation.output,
-            inLanguage: translation.languagePair.to
-        ) {
-            exception = .init(
-                "Had greater confidence in original output.",
-                isReportable: false,
-                userInfo: [
-                    "EnhancedTranslationOutput": enhancedOutput,
-                    "OriginalTranslationOutput": translation.output,
-                ],
-                metadata: .init(sender: self)
-            )
-        } else if let lastEnhancedOutputWord = enhancedOutput.components(separatedBy: " ").last,
-                  let lastOriginalOutputWord = translation.output.components(separatedBy: " ").last,
-                  await languageRecognitionService.matchConfidence(
-                      for: lastEnhancedOutputWord,
-                      inLanguage: translation.languagePair.to
-                  ) < languageRecognitionService.matchConfidence(
-                      for: lastOriginalOutputWord,
-                      inLanguage: translation.languagePair.to
-                  ) {
-            exception = .init(
-                "Had greater confidence in last word of original output.",
-                isReportable: false,
-                userInfo: [
-                    "LastEnhancedOutputWord": lastEnhancedOutputWord,
-                    "LastOriginalOutputWord": lastOriginalOutputWord,
-                ],
-                metadata: .init(sender: self)
+        }
+
+        if exception == nil {
+            exception = await getLanguageConfidenceException(
+                for: translation,
+                enhancedOutput: enhancedOutput
             )
         }
 

@@ -206,6 +206,16 @@ final class CoreStorage: @unchecked Sendable {
                             metadata: metadata,
                             prependingEnvironment: prependingEnvironment
                         )
+
+                    case let .uploadFile(
+                        atURL: fileURL,
+                        metadata: metadata
+                    ):
+                        try await self.uploadFile(
+                            at: fileURL,
+                            metadata: metadata,
+                            prependingEnvironment: prependingEnvironment
+                        )
                     }
 
                     settle(.success(result))
@@ -333,6 +343,38 @@ final class CoreStorage: @unchecked Sendable {
         ) { onProgress async throws(Exception) in
             try await putDataObservingProgress(
                 data,
+                metadata: metadata.asStorageMetadata(
+                    prependingEnvironment: prependingEnvironment
+                ),
+                onProgress: onProgress
+            )
+        }
+
+        return nil
+    }
+
+    private func uploadFile(
+        at fileURL: URL,
+        metadata: HostedItemMetadata,
+        prependingEnvironment: Bool
+    ) async throws(Exception) -> Any? {
+        Logger.log(
+            "Uploading file to path \"\(metadata.filePath)\".",
+            domain: .Networking.storage,
+            sender: self
+        )
+
+        $storedDownloadItemResults[metadata.filePath] = nil
+        $storedItemExistsResults[metadata.filePath] = nil
+
+        try await TransferProgressProbe.measure(
+            totalBytes: try? fileManager.attributesOfItem(
+                atPath: fileURL.path()
+            )[.size] as? Int,
+            onProgress: nil
+        ) { onProgress async throws(Exception) in
+            try await putFileObservingProgress(
+                at: fileURL,
                 metadata: metadata.asStorageMetadata(
                     prependingEnvironment: prependingEnvironment
                 ),
@@ -957,6 +999,24 @@ final class CoreStorage: @unchecked Sendable {
     ) async throws(Exception) {
         let uploadTask = firebaseStorage.putData(
             data,
+            metadata: metadata
+        )
+
+        let _uploadTask = LockIsolated(uploadTask)
+        try await awaitTransferCompletion(
+            of: uploadTask,
+            cancellingWith: { _uploadTask.wrappedValue.cancel() },
+            onProgress: onProgress
+        )
+    }
+
+    private func putFileObservingProgress(
+        at fileURL: URL,
+        metadata: StorageMetadata,
+        onProgress: @escaping @Sendable (StorageTransferProgress) -> Void
+    ) async throws(Exception) {
+        let uploadTask = firebaseStorage.putFile(
+            from: fileURL,
             metadata: metadata
         )
 
