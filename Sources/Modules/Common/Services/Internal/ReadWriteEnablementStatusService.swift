@@ -6,19 +6,16 @@
 //
 
 /* Native */
-import Combine
 import Foundation
 
 /* Proprietary */
 import AppSubsystem
 
 @MainActor
-final class ReadWriteEnablementStatusService {
+struct ReadWriteEnablementStatusService {
     // MARK: - Properties
 
     static let shared = ReadWriteEnablementStatusService()
-
-    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Init
 
@@ -26,17 +23,14 @@ final class ReadWriteEnablementStatusService {
 
     // MARK: - Listen for Read/Write Enablement Status Changes
 
-    func listenForReadWriteEnablementStatusChanges() {
-        guard let forcedUpdateModalDelegate = AppSubsystem.delegates.forcedUpdateModal else { return }
-
-        forcedUpdateModalDelegate
-            .forcedUpdateRequiredPublisher
-            .filter(\.self)
-            .prefix(1)
-            .sink { _ in
-                Networking.isReadWriteEnabled = false
-            }
-            .store(in: &cancellables)
+    func listenForReadWriteEnablementStatusChanges() async {
+        guard AppSubsystem.delegates.forcedUpdateModal != nil else { return }
+        for await isForcedUpdateRequired in SharedState(\.isForcedUpdateRequired)
+            .projectedValue
+            .changes where isForcedUpdateRequired {
+            Networking.isReadWriteEnabled = false
+            break
+        }
     }
 }
 

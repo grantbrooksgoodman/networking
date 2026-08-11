@@ -126,14 +126,19 @@ public enum Networking {
         FirebaseApp.configure()
         didInitialize = true
 
-        DevModeService.insertAction(.networkingOptionsAction, at: 0)
+        DevModeService.insertAction(
+            .networkingOptionsAction,
+            at: 0
+        )
 
         Task.background {
             config.healthDelegate.startMonitoring()
         }
 
         Task.background { @MainActor in
-            ReadWriteEnablementStatusService.shared.listenForReadWriteEnablementStatusChanges()
+            await ReadWriteEnablementStatusService
+                .shared
+                .listenForReadWriteEnablementStatusChanges()
         }
     }
 }
