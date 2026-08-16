@@ -165,46 +165,21 @@ public extension Networking {
     ///     myDatabaseDelegate
     /// )
     /// ```
-    final class Config: @unchecked Sendable {
+    struct Config: Sendable {
         /* MARK: Properties */
 
         fileprivate static let shared = Config()
 
-        /// A Boolean value that indicates whether system
-        /// dialog translations are enhanced with
-        /// artificial intelligence.
-        ///
-        /// When this value is `true`, dialogs presented
-        /// through AlertKit use AI-enhanced translations
-        /// powered by the Gemini API. The default is
-        /// `false`.
-        ///
-        /// To change this value, call
-        /// ``setIsEnhancedDialogTranslationEnabled(_:)``.
-        @LockIsolated public private(set) var isEnhancedDialogTranslationEnabled = false
-
-        /// The active network health estimation
-        /// configuration.
-        ///
-        /// This value controls the scoring parameters
-        /// used by the health estimator, including
-        /// channel weights, ramp anchors, and tier
-        /// boundaries. The default configuration is
-        /// suitable for most use cases.
-        ///
-        /// To change this value, call
-        /// ``setNetworkHealthConfiguration(_:)``.
-        @LockIsolated public private(set) var networkHealthConfiguration = NetworkHealthConfiguration.default
-
-        @LockIsolated package private(set) var activityIndicatorDelegate: NetworkActivityIndicatorDelegate = DefaultNetworkActivityIndicatorDelegate()
-        @LockIsolated package private(set) var authDelegate: AuthDelegate = Auth()
-        @LockIsolated package private(set) var databaseDelegate: DatabaseDelegate = Database()
-        @LockIsolated package private(set) var healthDelegate: NetworkHealthDelegate = NetworkHealthService.shared
-        @LockIsolated package private(set) var hostedTranslationDelegate: any HostedTranslationDelegate = HostedTranslationService.shared
-        @LockIsolated package private(set) var storageDelegate: StorageDelegate = Storage()
-
+        private let _activityIndicatorDelegate = LockIsolated<NetworkActivityIndicatorDelegate>(DefaultNetworkActivityIndicatorDelegate())
+        private let _authDelegate = LockIsolated<AuthDelegate>(Auth())
+        private let _databaseDelegate = LockIsolated<DatabaseDelegate>(Database())
         private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(nil)
         private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(nil)
+        private let _healthDelegate = LockIsolated<NetworkHealthDelegate>(NetworkHealthService.shared)
+        private let _hostedTranslationDelegate = LockIsolated<any HostedTranslationDelegate>(HostedTranslationService.shared)
+        private let _isEnhancedDialogTranslationEnabled = LockIsolated(false)
+        private let _networkHealthConfiguration = LockIsolated(NetworkHealthConfiguration.default)
+        private let _storageDelegate = LockIsolated<StorageDelegate>(Storage())
 
         /* MARK: Computed Properties */
 
@@ -236,8 +211,62 @@ public extension Networking {
             Persistent(.networkEnvironment).wrappedValue ?? .production
         }
 
+        /// A Boolean value that indicates whether system
+        /// dialog translations are enhanced with
+        /// artificial intelligence.
+        ///
+        /// When this value is `true`, dialogs presented
+        /// through AlertKit use AI-enhanced translations
+        /// powered by the Gemini API. The default is
+        /// `false`.
+        ///
+        /// To change this value, call
+        /// ``setIsEnhancedDialogTranslationEnabled(_:)``.
+        public var isEnhancedDialogTranslationEnabled: Bool {
+            _isEnhancedDialogTranslationEnabled.wrappedValue
+        }
+
+        /// The active network health estimation
+        /// configuration.
+        ///
+        /// This value controls the scoring parameters
+        /// used by the health estimator, including
+        /// channel weights, ramp anchors, and tier
+        /// boundaries. The default configuration is
+        /// suitable for most use cases.
+        ///
+        /// To change this value, call
+        /// ``setNetworkHealthConfiguration(_:)``.
+        public var networkHealthConfiguration: NetworkHealthConfiguration {
+            _networkHealthConfiguration.wrappedValue
+        }
+
+        package var activityIndicatorDelegate: NetworkActivityIndicatorDelegate {
+            _activityIndicatorDelegate.wrappedValue
+        }
+
+        package var authDelegate: AuthDelegate {
+            _authDelegate.wrappedValue
+        }
+
+        package var databaseDelegate: DatabaseDelegate {
+            _databaseDelegate.wrappedValue
+        }
+
         package var geminiAPIKeyDelegate: GeminiAPIKeyDelegate? {
             _geminiAPIKeyDelegate.wrappedValue
+        }
+
+        package var healthDelegate: NetworkHealthDelegate {
+            _healthDelegate.wrappedValue
+        }
+
+        package var hostedTranslationDelegate: any HostedTranslationDelegate {
+            _hostedTranslationDelegate.wrappedValue
+        }
+
+        package var storageDelegate: StorageDelegate {
+            _storageDelegate.wrappedValue
         }
 
         /* MARK: Init */
@@ -297,7 +326,7 @@ public extension Networking {
         public func setIsEnhancedDialogTranslationEnabled(
             _ isEnhancedDialogTranslationEnabled: Bool
         ) {
-            self.isEnhancedDialogTranslationEnabled = isEnhancedDialogTranslationEnabled
+            _isEnhancedDialogTranslationEnabled.wrappedValue = isEnhancedDialogTranslationEnabled
         }
 
         /// Sets the network health estimation
@@ -308,7 +337,7 @@ public extension Networking {
         public func setNetworkHealthConfiguration(
             _ networkHealthConfiguration: NetworkHealthConfiguration
         ) {
-            self.networkHealthConfiguration = networkHealthConfiguration
+            _networkHealthConfiguration.wrappedValue = networkHealthConfiguration
         }
 
         /* MARK: Delegate Registration */
@@ -371,13 +400,13 @@ public extension Networking {
                 return
             }
 
-            if let activityIndicatorDelegate { self.activityIndicatorDelegate = activityIndicatorDelegate }
-            if let authDelegate { self.authDelegate = authDelegate }
-            if let databaseDelegate { self.databaseDelegate = databaseDelegate }
+            if let activityIndicatorDelegate { _activityIndicatorDelegate.wrappedValue = activityIndicatorDelegate }
+            if let authDelegate { _authDelegate.wrappedValue = authDelegate }
+            if let databaseDelegate { _databaseDelegate.wrappedValue = databaseDelegate }
             if let geminiAPIKeyDelegate { _geminiAPIKeyDelegate.wrappedValue = geminiAPIKeyDelegate }
-            if let healthDelegate { self.healthDelegate = healthDelegate }
-            if let hostedTranslationDelegate { self.hostedTranslationDelegate = hostedTranslationDelegate }
-            if let storageDelegate { self.storageDelegate = storageDelegate }
+            if let healthDelegate { _healthDelegate.wrappedValue = healthDelegate }
+            if let hostedTranslationDelegate { _hostedTranslationDelegate.wrappedValue = hostedTranslationDelegate }
+            if let storageDelegate { _storageDelegate.wrappedValue = storageDelegate }
         }
 
         /// Registers a custom network activity indicator

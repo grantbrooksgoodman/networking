@@ -48,9 +48,17 @@ public protocol NetworkActivityIndicatorDelegate {
     // MARK: - Methods
 
     /// Shows the network activity indicator.
+    ///
+    /// The framework calls this method once for each
+    /// in-flight network operation. Balance every call with
+    /// a corresponding call to ``hide()``.
     func show()
 
     /// Hides the network activity indicator.
+    ///
+    /// The framework calls this method once for each network
+    /// operation that finishes. Each call balances a prior
+    /// call to ``show()``.
     func hide()
 }
 
@@ -63,6 +71,8 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
     /// is ``Color/white``.
     @MainActor
     public let progressViewTintColor: Color? = .white
+
+    private static let activityReferenceCount = LockIsolated(0)
 
     // MARK: - Computed Properties
 
@@ -88,17 +98,34 @@ public struct DefaultNetworkActivityIndicatorDelegate: NetworkActivityIndicatorD
 
     // MARK: - Methods
 
-    /// Shows the network activity indicator.
+    /// Increments the count of in-flight network operations,
+    /// showing the network activity indicator if it is not
+    /// already visible.
+    ///
+    /// Balance every call with a corresponding call to
+    /// ``hide()``. The indicator remains visible until every
+    /// in-flight operation has been balanced.
     public func show() {
-        Task { @MainActor in
-            SharedState(\.isNetworkActivityOccurring).wrappedValue = true
-        }
+        Self.activityReferenceCount.projectedValue.withValue { $0 += 1 }
+        Self.synchronizeIndicatorVisibility()
     }
 
-    /// Hides the network activity indicator.
+    /// Decrements the count of in-flight network operations,
+    /// hiding the network activity indicator when no
+    /// operations remain.
+    ///
+    /// Each call balances a prior call to ``show()``. Calls
+    /// that would drive the count below zero have no effect.
     public func hide() {
+        Self.activityReferenceCount.projectedValue.withValue { $0 = max(0, $0 - 1) }
+        Self.synchronizeIndicatorVisibility()
+    }
+
+    // MARK: - Auxiliary
+
+    private static func synchronizeIndicatorVisibility() {
         Task { @MainActor in
-            SharedState(\.isNetworkActivityOccurring).wrappedValue = false
+            SharedState(\.isNetworkActivityOccurring).wrappedValue = activityReferenceCount.wrappedValue > 0
         }
     }
 }

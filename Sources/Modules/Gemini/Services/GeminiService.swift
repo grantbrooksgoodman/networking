@@ -62,6 +62,9 @@ struct GeminiService {
         let data: Data
         let urlResponse: URLResponse
         do {
+            Networking.config.activityIndicatorDelegate.show()
+            defer { Networking.config.activityIndicatorDelegate.hide() }
+
             (data, urlResponse) = try await urlSession.data(
                 for: urlRequest,
                 delegate: HealthTaskMetricsDelegate()

@@ -54,6 +54,9 @@ final class CoreStorage: @unchecked Sendable {
         )
 
         Task {
+            Networking.config.activityIndicatorDelegate.show()
+            defer { Networking.config.activityIndicatorDelegate.hide() }
+
             _ = try? await firebaseStorage
                 .child("prewarm")
                 .getMetadata()
@@ -282,6 +285,8 @@ final class CoreStorage: @unchecked Sendable {
             return stream
         }
 
+        Networking.config.activityIndicatorDelegate.show()
+
         let timeout = Timeout(after: duration) {
             continuation.finish(
                 throwing: Exception.timedOut(
@@ -315,6 +320,7 @@ final class CoreStorage: @unchecked Sendable {
 
         continuation.onTermination = { _ in
             task.cancel()
+            Networking.config.activityIndicatorDelegate.hide()
         }
 
         return stream

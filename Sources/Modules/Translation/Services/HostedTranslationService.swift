@@ -197,9 +197,8 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             return resolvedTranslations.compactMap(\.self)
         }
 
-        // TODO: Audit this.
-        // Networking.config.activityIndicatorDelegate.show()
-        // defer { Networking.config.activityIndicatorDelegate.hide() }
+        Networking.config.activityIndicatorDelegate.show()
+        defer { Networking.config.activityIndicatorDelegate.hide() }
 
         let missedInputs = archiveMisses.map {
             TranslationInput(

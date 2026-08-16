@@ -248,7 +248,7 @@ final class CoreDatabase: @unchecked Sendable {
         try await GuardedOperation.run(
             timeout: duration,
             recordsCensoredSampleOnTimeout: true,
-            showsActivityIndicator: false,
+            showsActivityIndicator: true,
             sender: self
         ) { healthToken, settle in
             Logger.log(
@@ -312,8 +312,28 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
+        // The indicator reflects the initial connection; it is
+        // cleared once the first snapshot arrives or the
+        // observation terminates, whichever comes first.
+        Networking.config.activityIndicatorDelegate.show()
+
+        @LockIsolated var didHideActivity = false
+        @Sendable
+        func hideActivityIfNeeded() {
+            let shouldHide = $didHideActivity.withValue { hidden -> Bool in
+                guard !hidden else { return false }
+                hidden = true
+                return true
+            }
+
+            guard shouldHide else { return }
+            Networking.config.activityIndicatorDelegate.hide()
+        }
+
         let databaseReference = firebaseDatabase.child(path)
         let observerHandle = databaseReference.observe(.value) { snapshot in
+            hideActivityIfNeeded()
+
             guard !self.isEmpty(snapshot.value),
                   let value = snapshot.value else {
                 return continuation.finish(
@@ -337,6 +357,7 @@ final class CoreDatabase: @unchecked Sendable {
 
             continuation.yield(value)
         } withCancel: { error in
+            hideActivityIfNeeded()
             continuation.finish(
                 throwing: Exception(
                     error,
@@ -347,6 +368,8 @@ final class CoreDatabase: @unchecked Sendable {
 
         let _databaseReference = LockIsolated(databaseReference)
         continuation.onTermination = { _ in
+            hideActivityIfNeeded()
+
             Logger.log(
                 "Stopped observing values at path \"\(path)\".",
                 domain: .Networking.database,
@@ -490,7 +513,7 @@ final class CoreDatabase: @unchecked Sendable {
         let committedValue = try await GuardedOperation.run(
             timeout: duration,
             recordsCensoredSampleOnTimeout: true,
-            showsActivityIndicator: false,
+            showsActivityIndicator: true,
             sender: self
         ) { healthToken, settle in
             Logger.log(
