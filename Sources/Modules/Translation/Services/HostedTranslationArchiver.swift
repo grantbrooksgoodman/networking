@@ -27,11 +27,14 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     // MARK: - Types
 
     private struct State {
+        var hasEnteredBackground = false
         var isPopulating = false
         var translationDataSample: TranslationDataSample = .empty
     }
 
     // MARK: - Properties
+
+    private let minimumRefreshDelay: TimeInterval = 10
 
     @LockIsolated private var state = State()
 
@@ -42,6 +45,12 @@ final class HostedTranslationArchiver: @unchecked Sendable {
             !$state.translationDataSample.isExpired
     }
 
+    private var refreshInterval: TimeInterval {
+        TranslationConstants
+            .translationDataSampleRefreshInterval
+            .timeInterval
+    }
+
     // MARK: - Init
 
     init() {
@@ -49,11 +58,9 @@ final class HostedTranslationArchiver: @unchecked Sendable {
 
         Task.background(delayedBy: .seconds(10)) { [weak self] in
             while true {
-                await self?.refreshTranslationDataSnapshot(forced: true)
-                guard self != nil else { return }
-                try await Task.sleep(
-                    for: TranslationConstants.translationDataSampleRefreshInterval
-                )
+                await self?.refreshTranslationDataSnapshot()
+                guard let delay = self?.nextRefreshDelay() else { return }
+                try await Task.sleep(for: delay)
             }
         }
     }
@@ -299,12 +306,24 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         )
     }
 
-    private nonisolated(nonsending) func populateTranslationDataSnapshot(forced: Bool) async throws(Exception) {
+    private func nextRefreshDelay() -> Duration {
+        $state.withValue { state in
+            .seconds(max(
+                refreshInterval - abs(
+                    state.translationDataSample.date.timeIntervalSinceNow
+                ),
+                minimumRefreshDelay
+            ))
+        }
+    }
+
+    private nonisolated(nonsending) func populateTranslationDataSnapshot() async throws(Exception) {
         let shouldProceed = $state.withValue { state in
+            let sample = state.translationDataSample
             guard !state.isPopulating,
-                  forced ||
-                  state.translationDataSample.isExpired ||
-                  state.translationDataSample == .empty else { return false }
+                  sample == .empty ||
+                  sample.isExpired ||
+                  abs(sample.date.timeIntervalSinceNow) >= refreshInterval else { return false }
             state.isPopulating = true
             return true
         }
@@ -374,9 +393,9 @@ final class HostedTranslationArchiver: @unchecked Sendable {
         }
     }
 
-    private nonisolated(nonsending) func refreshTranslationDataSnapshot(forced: Bool) async {
+    private nonisolated(nonsending) func refreshTranslationDataSnapshot() async {
         do throws(Exception) {
-            try await populateTranslationDataSnapshot(forced: forced)
+            try await populateTranslationDataSnapshot()
         } catch {
             Logger.log(
                 error,
@@ -388,13 +407,29 @@ final class HostedTranslationArchiver: @unchecked Sendable {
     private func registerForegroundRefreshObserver() {
         #if canImport(UIKit)
         _ = notificationCenter.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.$state.withValue { $0.hasEnteredBackground = true }
+        }
+
+        _ = notificationCenter.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: nil
         ) { [weak self] _ in
             guard let self else { return }
+
+            // The foreground notification also fires during cold
+            // launch, where the snapshot download would monopolize
+            // the realtime socket and starve the launch-critical
+            // reads queued behind it; refresh only on genuine
+            // background-to-foreground returns and leave initial
+            // population to the delayed refresh loop.
+            guard $state.hasEnteredBackground else { return }
             Task.background {
-                await self.refreshTranslationDataSnapshot(forced: false)
+                await self.refreshTranslationDataSnapshot()
             }
         }
         #endif

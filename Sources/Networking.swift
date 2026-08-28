@@ -12,8 +12,8 @@ import Foundation
 import AppSubsystem
 
 /* 3rd-party */
-import FirebaseAppCheck
 import FirebaseCore
+import FirebaseDatabase
 
 // MARK: - Networking
 
@@ -104,25 +104,18 @@ public enum Networking {
     /// Configures the framework and prepares all
     /// internal services for use.
     ///
-    /// Call this method once at app launch. It configures
-    /// Firebase App Check, initializes the Firebase
-    /// backend, registers Developer Mode actions, starts
-    /// network health monitoring, and begins observing
-    /// read/write enablement status. Monitoring begins in
-    /// background tasks and does not block launch.
-    ///
-    /// App Check uses App Attest on physical devices and
-    /// a debug provider in the simulator. The provider
-    /// factory is set before Firebase configuration so
-    /// that attestation is active for all subsequent
-    /// requests.
+    /// Call this method once at app launch. It initializes
+    /// the Firebase backend, registers Developer Mode
+    /// actions, starts network health monitoring, and
+    /// begins observing read/write enablement status.
+    /// Monitoring begins in background tasks and does not
+    /// block launch.
     ///
     /// - Important: This method must be called on the
     ///   main actor. Accessing ``config`` before calling
     ///   this method results in a fatal error.
     @MainActor
     public static func initialize() {
-        AppCheck.configure()
         FirebaseApp.configure()
         didInitialize = true
 
@@ -140,6 +133,29 @@ public enum Networking {
                 .shared
                 .listenForReadWriteEnablementStatusChanges()
         }
+    }
+
+    /// Enables or disables verbose Firebase diagnostic logging.
+    ///
+    /// When enabled, the Realtime Database SDK logs its connect,
+    /// authenticate, and listen activity, and the Firebase core
+    /// logger is raised to its most detailed level.
+    ///
+    /// - Parameter enabled: A Boolean value that determines whether
+    ///   verbose logging is enabled.
+    ///
+    /// - Important: Realtime Database logging can only be configured
+    ///   before the first database operation, so call this
+    ///   immediately after ``initialize()`` and before any read,
+    ///   write, or prewarm.
+    @MainActor
+    public static func setVerboseFirebaseLoggingEnabled(
+        _ enabled: Bool
+    ) {
+        FirebaseDatabase.Database.setLoggingEnabled(enabled)
+        FirebaseConfiguration.shared.setLoggerLevel(
+            enabled ? .debug : .notice
+        )
     }
 }
 
@@ -494,25 +510,5 @@ public extension Networking {
         ) {
             register(storageDelegate: storageDelegate)
         }
-    }
-}
-
-private final class AppAttestAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
-    func createProvider(
-        with app: FirebaseApp
-    ) -> (any AppCheckProvider)? {
-        AppAttestProvider(app: app)
-    }
-}
-
-private extension AppCheck {
-    static func configure() {
-        #if targetEnvironment(simulator)
-        let providerFactory = AppCheckDebugProviderFactory()
-        #else
-        let providerFactory = AppAttestAppCheckProviderFactory()
-        #endif
-
-        AppCheck.setAppCheckProviderFactory(providerFactory)
     }
 }

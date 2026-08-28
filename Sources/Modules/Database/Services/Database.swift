@@ -102,6 +102,14 @@ struct Database: DatabaseDelegate {
 
     // MARK: - Prewarming
 
+    func awaitRealtimeConnection(
+        timeout: Duration
+    ) async -> Bool {
+        await coreDatabase.awaitRealtimeConnection(
+            timeout: timeout
+        )
+    }
+
     func prewarm() {
         coreDatabase.prewarm()
     }

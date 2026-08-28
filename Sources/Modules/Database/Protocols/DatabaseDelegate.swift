@@ -61,6 +61,20 @@ import AppSubsystem
 /// ``Networking/Config/registerDatabaseDelegate(_:)``.
 // swiftlint:disable:next class_delegate_protocol
 public protocol DatabaseDelegate {
+    /// Suspends until the realtime connection is established,
+    /// or the given timeout elapses.
+    ///
+    /// Callers that must read authoritative server data – and
+    /// never act on a possibly-stale local cache – use this to
+    /// confirm connectivity before proceeding.
+    ///
+    /// - Parameter timeout: The maximum time to wait for the
+    ///   connection.
+    ///
+    /// - Returns: `true` if the connection was established within
+    ///   the timeout; otherwise, `false`.
+    func awaitRealtimeConnection(timeout: Duration) async -> Bool
+
     /// Generates a unique key at the specified path.
     ///
     /// - Parameter path: The database path at which to

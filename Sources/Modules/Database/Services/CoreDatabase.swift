@@ -175,6 +175,61 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Prewarming
 
+    func awaitRealtimeConnection(
+        timeout: Duration
+    ) async -> Bool {
+        // Wrapped for Sendable capture in the concurrent finish() below,
+        // mirroring observe()'s handling of the reference.
+        let connectedReference = LockIsolated(
+            firebaseDatabase
+                .database
+                .reference(withPath: ".info/connected")
+        )
+
+        // (observer handle, whether the continuation has resumed)
+        let state = LockIsolated<(handle: DatabaseHandle?, didFinish: Bool)>((nil, false))
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            @Sendable
+            func finish(_ connected: Bool) {
+                let handleToRemove: DatabaseHandle?? = state.projectedValue.withValue { current in
+                    guard !current.didFinish else { return DatabaseHandle??.none }
+                    current.didFinish = true
+                    return .some(current.handle)
+                }
+
+                // .none => already finished; do nothing.
+                guard case let .some(handle) = handleToRemove else { return }
+                if let handle {
+                    connectedReference.wrappedValue.removeObserver(withHandle: handle)
+                }
+
+                continuation.resume(returning: connected)
+            }
+
+            let handle = connectedReference.wrappedValue.observe(.value) { snapshot in
+                guard (snapshot.value as? Bool) == true else { return }
+                finish(true)
+            }
+
+            // If the connection reported true before the handle was stored,
+            // finish() could not remove the observer; detach it here.
+            let didFinishBeforeStore = state.projectedValue.withValue { current -> Bool in
+                guard !current.didFinish else { return true }
+                current.handle = handle
+                return false
+            }
+
+            if didFinishBeforeStore {
+                connectedReference.wrappedValue.removeObserver(withHandle: handle)
+            }
+
+            Task {
+                try? await Task.sleep(for: timeout)
+                finish(false)
+            }
+        }
+    }
+
     func prewarm() {
         Logger.log(
             "Prewarming database connection.",
@@ -182,9 +237,39 @@ final class CoreDatabase: @unchecked Sendable {
             sender: self
         )
 
-        firebaseDatabase
-            .child(".info/connected")
-            .observeSingleEvent(of: .value) { _ in }
+        // Retain a persistent observer on the special .info/connected
+        // location until the realtime socket first reports connected, then
+        // detach. A one-shot observeSingleEvent fires on the immediate local
+        // "false" and detaches, which does not hold the connection
+        // establishing; a retained observer forces the SDK to open and keep
+        // the authenticated socket from launch, so it is ready sooner for the
+        // first writes and for the observers that stream fresh data. Long-
+        // lived connection tracking is owned by ConnectionStabilityObserver,
+        // so this releases as soon as the connection is up.
+        let observerHandle = LockIsolated<DatabaseHandle?>(nil)
+        let handle = firebaseDatabase
+            .database
+            .reference(withPath: ".info/connected")
+            .observe(.value) { [weak self] snapshot in
+                guard let self,
+                      (snapshot.value as? Bool) == true else { return }
+
+                // Atomically take the handle so only the first connected
+                // event detaches, and re-entrant events see nil.
+                let handleToRemove: DatabaseHandle? = observerHandle.projectedValue.withValue { handle in
+                    let currentHandle = handle
+                    handle = nil
+                    return currentHandle
+                }
+
+                guard let handleToRemove else { return }
+                firebaseDatabase
+                    .database
+                    .reference(withPath: ".info/connected")
+                    .removeObserver(withHandle: handleToRemove)
+            }
+
+        observerHandle.wrappedValue = handle
     }
 
     // MARK: - Data Integrity Validation

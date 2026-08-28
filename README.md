@@ -138,15 +138,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 }
 ```
 
-`Networking.initialize()` performs five operations:
+`Networking.initialize()` performs four operations:
 
-1. Configures Firebase App Check, using App Attest on physical devices and a debug provider in the simulator.
-2. Configures the Firebase backend by calling `FirebaseApp.configure()`.
-3. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching, network activity indicator toggling, and network health inspection.
-4. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
-5. Starts the network health monitor, which passively observes operation performance to estimate connection quality.
+1. Configures the Firebase backend by calling `FirebaseApp.configure()`.
+2. Registers Developer Mode actions into AppSubsystem's `DevModeService` for environment switching, network activity indicator toggling, and network health inspection.
+3. Begins monitoring read/write enablement status through AppSubsystem's forced-update delegate system.
+4. Starts the network health monitor, which passively observes operation performance to estimate connection quality.
 
-Steps 4 and 5 begin in background tasks and do not block launch.
+Steps 3 and 4 begin in background tasks and do not block launch.
 
 > **Important:** `Networking.initialize()` must be called on the main actor. The `Networking.config` property is not available until initialization completes.
 
@@ -1004,7 +1003,7 @@ Networking relies on three packages:
 | Package | Role |
 |---|---|
 | [AppSubsystem](https://github.com/grantbrooksgoodman/app-subsystem) | Provides the architectural foundation that Networking builds on – including dependency injection, persistence, state management, logging, caching, reactive observation, and developer tools. AppSubsystem must be initialized before Networking. |
-| [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) | Provides the default backend implementations for authentication (FirebaseAuth), real-time data (FirebaseDatabase), file storage (FirebaseStorage), and request attestation (FirebaseAppCheck). |
+| [Firebase iOS SDK](https://github.com/firebase/firebase-ios-sdk) | Provides the default backend implementations for authentication (FirebaseAuth), real-time data (FirebaseDatabase), and file storage (FirebaseStorage). |
 | [SwiftSyntax](https://github.com/swiftlang/swift-syntax) | Powers the `@Serializable`, `@Serialized`, `@RemotelyUpdatable`, and `@Updatable` macros. Used only at compile time by the macro plugin target and does not contribute to your app's binary size. |
 
 AppSubsystem is a prerequisite – _not_ an optional companion. Networking extends AppSubsystem's type system by registering its own dependency keys, persistent storage keys, cache domains, logger domains, and Developer Mode actions. Without AppSubsystem, these registrations have no host system to attach to, and the framework cannot operate.
