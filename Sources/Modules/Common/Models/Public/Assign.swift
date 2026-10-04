@@ -79,7 +79,7 @@ public enum AssignBuilder<Root> {
     public static func buildBlock(
         _ components: [Assign<Root>]...
     ) -> [Assign<Root>] {
-        components.flatMap { $0 }
+        components.flatMap(\.self)
     }
 
     public static func buildEither(

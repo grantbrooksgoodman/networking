@@ -17,5 +17,7 @@ public extension Translation {
     /// Use this property to obtain a ``TranslationReference``
     /// that can be stored in the database and later decoded
     /// back into a `Translation`.
-    var reference: TranslationReference { .init(self) }
+    var reference: TranslationReference {
+        .init(self)
+    }
 }

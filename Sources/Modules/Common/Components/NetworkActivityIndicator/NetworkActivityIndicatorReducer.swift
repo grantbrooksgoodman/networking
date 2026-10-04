@@ -102,7 +102,10 @@ struct NetworkActivityIndicatorReducer: Reducer {
                 return true
             }
 
-            var activityChangeEffects: Effect<Action> {
+            /// Local `func` on purpose: closures inside a local computed `var`'s getter lose
+            /// their `@MainActor` isolation at codegen (Swift 6.0–6.3.3, no diagnostic) and
+            /// run on the cooperative pool, which crashed `UIImpactFeedbackGenerator` here.
+            func activityChangeEffects() -> Effect<Action> {
                 var effects = [
                     hideIfInactiveEffect,
                     hideIndicatorEffect,
@@ -118,10 +121,10 @@ struct NetworkActivityIndicatorReducer: Reducer {
             }
 
             guard isVisible,
-                  state.isVisible != canShowIndicator else { return activityChangeEffects }
+                  state.isVisible != canShowIndicator else { return activityChangeEffects() }
             state.isVisible = canShowIndicator
             state.yOffset = canShowIndicator ? 0 : State.Floats.hiddenYOffset
-            return activityChangeEffects
+            return activityChangeEffects()
         }
 
         return .none

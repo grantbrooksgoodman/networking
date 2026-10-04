@@ -20,7 +20,9 @@ public extension [String] {
     ///
     /// Use ``isBangQualifiedEmpty`` to test whether an
     /// array carries this sentinel.
-    static var bangQualifiedEmpty: [String] { [.bangQualifiedEmpty] }
+    static var bangQualifiedEmpty: [String] {
+        [.bangQualifiedEmpty]
+    }
 
     /// A Boolean value that indicates whether the array is
     /// empty or contains only bang-qualified empty strings.

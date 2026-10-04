@@ -30,7 +30,9 @@ public enum NetworkEnvironment: String, Codable {
 
     /// A human-readable description of the environment,
     /// such as `"Development"`.
-    public var description: String { rawValue.firstUppercase }
+    public var description: String {
+        rawValue.firstUppercase
+    }
 
     /// An abbreviated label for the environment, such as
     /// `"dev"`, `"stage"`, or `"prod"`.

@@ -20,7 +20,9 @@ public extension String {
     ///
     /// Use ``isBangQualifiedEmpty`` to test whether a string
     /// carries this sentinel.
-    static var bangQualifiedEmpty: String { "!" }
+    static var bangQualifiedEmpty: String {
+        "!"
+    }
 
     /// A Boolean value that indicates whether the string is
     /// blank or equal to ``bangQualifiedEmpty``.
