@@ -24,7 +24,8 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private static let coalescer = Coalescer<String, Callback<Any?, Exception>>()
+    /// Boxed output because `Any?` payloads are not `Sendable`.
+    private static let coalescer = Coalescer<String, UncheckedSendable<Any?>, Exception>()
 
     private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(nil)
 
@@ -73,7 +74,7 @@ final class CoreStorage: @unchecked Sendable {
         let resolvedOperation = operation.resolvingAdaptiveCacheStrategy()
         let resolvedGlobalRawValue = globalCacheStrategy.map(\.resolved.rawValue) ?? ""
 
-        let callback = await Self.coalescer.submitUnlessCancelled(
+        let result = try await Self.coalescer.submitUnlessCancelled(
             String.fromCurrentEditorContext(
                 sender: self
             ) + "/" + (
@@ -82,34 +83,28 @@ final class CoreStorage: @unchecked Sendable {
                     + prependingEnvironment.description
                     + duration.description
             ).encodedHash
-        ) { [weak self] in
+        ) { [weak self] () async throws(Exception) -> UncheckedSendable<Any?> in
             guard let self else {
-                return .failure(Exception(
+                throw Exception(
                     "Service has been deallocated.",
                     metadata: .init(sender: Self.self)
-                ))
-            }
-
-            do throws(Exception) {
-                let result = try await _performOperation(
-                    resolvedOperation,
-                    prependingEnvironment: prependingEnvironment,
-                    timeout: duration
                 )
-
-                return .success(result)
-            } catch {
-                return .failure(error)
             }
+
+            return try await UncheckedSendable(_performOperation(
+                resolvedOperation,
+                prependingEnvironment: prependingEnvironment,
+                timeout: duration
+            ))
         }
 
-        guard let callback else {
+        guard let result else {
             throw .cancelled(
                 metadata: .init(sender: self)
             )
         }
 
-        return try callback.get()
+        return result.wrappedValue
     }
 
     private func _performOperation(
