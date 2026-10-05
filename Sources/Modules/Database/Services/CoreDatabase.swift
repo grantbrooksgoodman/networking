@@ -148,7 +148,7 @@ final class CoreDatabase: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private static let coalescer = KeyedCoalescer<String, Callback<Any?, Exception>>()
+    private static let coalescer = Coalescer<String, Callback<Any?, Exception>>()
 
     private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(nil)
 
@@ -178,9 +178,9 @@ final class CoreDatabase: @unchecked Sendable {
     func awaitRealtimeConnection(
         timeout: Duration
     ) async -> Bool {
-        // Wrapped for Sendable capture in the concurrent finish() below,
+        // Boxed for Sendable capture in the concurrent finish() below,
         // mirroring observe()'s handling of the reference.
-        let connectedReference = LockIsolated(
+        let connectedReference = UncheckedSendable(
             firebaseDatabase
                 .database
                 .reference(withPath: ".info/connected")
@@ -451,7 +451,8 @@ final class CoreDatabase: @unchecked Sendable {
             )
         }
 
-        let _databaseReference = LockIsolated(databaseReference)
+        // Boxed to cross into the @Sendable termination handler.
+        let _databaseReference = UncheckedSendable(databaseReference)
         continuation.onTermination = { _ in
             hideActivityIfNeeded()
 

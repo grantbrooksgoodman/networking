@@ -186,11 +186,14 @@ public extension Networking {
 
         fileprivate static let shared = Config()
 
-        private let _activityIndicatorDelegate = LockIsolated<NetworkActivityIndicatorDelegate>(DefaultNetworkActivityIndicatorDelegate())
-        private let _authDelegate = LockIsolated<AuthDelegate>(Auth())
-        private let _databaseDelegate = LockIsolated<DatabaseDelegate>(Database())
+        // Delegate protocols without a `Sendable` requirement place
+        // no guarantee on their conformers, so the claim is made
+        // explicitly here rather than inferred from the lock.
+        private let _activityIndicatorDelegate = UncheckedLockIsolated<NetworkActivityIndicatorDelegate>(DefaultNetworkActivityIndicatorDelegate())
+        private let _authDelegate = UncheckedLockIsolated<AuthDelegate>(Auth())
+        private let _databaseDelegate = UncheckedLockIsolated<DatabaseDelegate>(Database())
         private let _enhancedTranslationStatusVerbosity = LockIsolated<EnhancedTranslationStatusVerbosity?>(nil)
-        private let _geminiAPIKeyDelegate = LockIsolated<GeminiAPIKeyDelegate?>(nil)
+        private let _geminiAPIKeyDelegate = UncheckedLockIsolated<GeminiAPIKeyDelegate?>(nil)
         private let _healthDelegate = LockIsolated<NetworkHealthDelegate>(NetworkHealthService.shared)
         private let _hostedTranslationDelegate = LockIsolated<any HostedTranslationDelegate>(HostedTranslationService.shared)
         private let _isEnhancedDialogTranslationEnabled = LockIsolated(false)

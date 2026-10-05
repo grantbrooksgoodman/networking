@@ -34,7 +34,10 @@ import AppSubsystem
 final class HealthTaskMetricsDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     // MARK: - Properties
 
-    private let _collectedMetrics = LockIsolated<URLSessionTaskMetrics?>(nil)
+    /// `URLSessionTaskMetrics` carries no `Sendable` guarantee, so
+    /// the claim is made explicitly here rather than inferred from
+    /// the lock.
+    private let _collectedMetrics = UncheckedLockIsolated<URLSessionTaskMetrics?>(nil)
 
     // MARK: - URLSessionTaskDelegate Conformance
 

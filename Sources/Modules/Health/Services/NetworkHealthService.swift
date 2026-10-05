@@ -31,7 +31,10 @@ struct NetworkHealthService: NetworkHealthDelegate {
     private let pathMonitor = LockIsolated<NWPathMonitor?>(nil)
     private let pathState = LockIsolated<PathState>(.init())
     private let prober = LockIsolated<NetworkHealthProber?>(nil)
-    private let radioTechnologyObserver = LockIsolated<(any NSObjectProtocol)?>(nil)
+    // Observer tokens are `any NSObjectProtocol`, which carries no
+    // `Sendable` guarantee, so the claim is made explicitly here
+    // rather than inferred from the lock.
+    private let radioTechnologyObserver = UncheckedLockIsolated<(any NSObjectProtocol)?>(nil)
     private let _health = LockIsolated<NetworkHealth>(.unknown)
 
     @SharedState(\.networkHealth) private var networkHealth

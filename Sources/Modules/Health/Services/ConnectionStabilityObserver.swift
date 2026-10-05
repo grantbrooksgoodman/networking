@@ -56,7 +56,10 @@ struct ConnectionStabilityObserver {
     // MARK: - Properties
 
     private let onEvent: @Sendable (NetworkHealthEvent) -> Void
-    private let state = LockIsolated(MutableState())
+    /// `MutableState` stores `any NSObjectProtocol` observer tokens,
+    /// which carry no `Sendable` guarantee, so the claim is made
+    /// explicitly here rather than inferred from the lock.
+    private let state = UncheckedLockIsolated(MutableState())
 
     // MARK: - Computed Properties
 

@@ -24,7 +24,7 @@ final class CoreStorage: @unchecked Sendable {
 
     // MARK: - Properties
 
-    private static let coalescer = KeyedCoalescer<String, Callback<Any?, Exception>>()
+    private static let coalescer = Coalescer<String, Callback<Any?, Exception>>()
 
     private let _globalCacheStrategy = LockIsolated<CacheStrategy?>(nil)
 
@@ -1008,7 +1008,8 @@ final class CoreStorage: @unchecked Sendable {
             metadata: metadata
         )
 
-        let _uploadTask = LockIsolated(uploadTask)
+        // Boxed to cross into the @Sendable cancellation closure.
+        let _uploadTask = UncheckedSendable(uploadTask)
         try await awaitTransferCompletion(
             of: uploadTask,
             cancellingWith: { _uploadTask.wrappedValue.cancel() },
@@ -1026,7 +1027,8 @@ final class CoreStorage: @unchecked Sendable {
             metadata: metadata
         )
 
-        let _uploadTask = LockIsolated(uploadTask)
+        // Boxed to cross into the @Sendable cancellation closure.
+        let _uploadTask = UncheckedSendable(uploadTask)
         try await awaitTransferCompletion(
             of: uploadTask,
             cancellingWith: { _uploadTask.wrappedValue.cancel() },
@@ -1088,7 +1090,8 @@ final class CoreStorage: @unchecked Sendable {
             .child(path)
             .write(toFile: localPath)
 
-        let _downloadTask = LockIsolated(downloadTask)
+        // Boxed to cross into the @Sendable cancellation closure.
+        let _downloadTask = UncheckedSendable(downloadTask)
         try await awaitTransferCompletion(
             of: downloadTask,
             cancellingWith: { _downloadTask.wrappedValue.cancel() },

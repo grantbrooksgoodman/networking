@@ -77,7 +77,8 @@ struct Database: DatabaseDelegate {
                         )
                     }
 
-                    continuation.yield(LockIsolated(value).wrappedValue)
+                    // UncheckedSendable transfer satisfies yield's `sending` requirement.
+                    continuation.yield(UncheckedSendable(value).wrappedValue)
                 }
 
                 continuation.finish()

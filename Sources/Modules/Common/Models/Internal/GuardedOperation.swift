@@ -122,7 +122,7 @@ enum GuardedOperation {
         // the task's lifetime regardless of whether anyone is still
         // awaiting it.
         let operationTask = Task {
-            await withCheckedContinuation { (continuation: CheckedContinuation<LockIsolated<Result<Any?, Exception>>, Never>) in
+            await withCheckedContinuation { (continuation: CheckedContinuation<UncheckedSendable<Result<Any?, Exception>>, Never>) in
                 @LockIsolated var didSettle = false
                 var canSettle: Bool {
                     $didSettle.withValue {
@@ -152,7 +152,7 @@ enum GuardedOperation {
                     ))
 
                     continuation.resume(
-                        returning: LockIsolated(timedOutResult)
+                        returning: UncheckedSendable(timedOutResult)
                     )
                 }
 
@@ -164,8 +164,8 @@ enum GuardedOperation {
                         Networking.config.activityIndicatorDelegate.hide()
                     }
 
-                    // LockIsolated transfer satisfies resume's `sending` requirement.
-                    continuation.resume(returning: LockIsolated(result))
+                    // UncheckedSendable transfer satisfies resume's `sending` requirement.
+                    continuation.resume(returning: UncheckedSendable(result))
                 }
             }
         }

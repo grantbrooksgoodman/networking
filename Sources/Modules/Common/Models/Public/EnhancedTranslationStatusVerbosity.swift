@@ -15,7 +15,7 @@ import Foundation
 /// ``Networking/Config/setEnhancedTranslationStatusVerbosity(_:)``
 /// to control the feedback shown when translations are
 /// enhanced with artificial intelligence.
-public enum EnhancedTranslationStatusVerbosity {
+public enum EnhancedTranslationStatusVerbosity: Sendable {
     /// Surfaces status messages only when an enhancement
     /// fails.
     case errorsOnly
