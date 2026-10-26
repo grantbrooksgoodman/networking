@@ -322,40 +322,20 @@ final class HostedTranslationService: HostedTranslationDelegate, @unchecked Send
             domain: .Networking.hostedTranslation
         )
 
-        do {
-            return try await postProcess(
-                translator.translate(
-                    .init(
-                        input.value.trimmingTrailingWhitespace,
-                        alternate: input.alternate?.trimmingTrailingWhitespace
-                    ),
-                    languagePair: languagePair,
-                    hud: hudConfig,
-                    timeout: (.seconds(10), false)
-                ),
-                enhancementConfig: enhancementConfig,
-                archiveTreatment: .addToBothArchives,
-                archiveStrategy: archiveStrategy
-            )
-        } catch {
-            guard error.isEqual(toAny: [
-                .Networking.Translation.exhaustedAvailablePlatforms,
-                .Networking.Translation.sameTranslationInputOutput,
-            ]) else {
-                throw error
-            }
-
-            return try await postProcess(
+        return try await postProcess(
+            translator.translate(
                 .init(
-                    input: input,
-                    output: input.value.sanitized,
-                    languagePair: languagePair
+                    input.value.trimmingTrailingWhitespace,
+                    alternate: input.alternate?.trimmingTrailingWhitespace
                 ),
-                enhancementConfig: enhancementConfig,
-                archiveTreatment: .addToBothArchives,
-                archiveStrategy: archiveStrategy
-            )
-        }
+                languagePair: languagePair,
+                hud: hudConfig,
+                timeout: (.seconds(10), false)
+            ),
+            enhancementConfig: enhancementConfig,
+            archiveTreatment: .addToBothArchives,
+            archiveStrategy: archiveStrategy
+        )
     }
 
     // MARK: - Auxiliary

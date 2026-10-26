@@ -426,10 +426,7 @@ final class CoreStorage: @unchecked Sendable {
             do {
                 try await firebaseStorage.child(path).delete()
             } catch {
-                throw Exception(
-                    error,
-                    metadata: .init(sender: self)
-                )
+                throw exception(from: error)
             }
         }
 
@@ -704,10 +701,7 @@ final class CoreStorage: @unchecked Sendable {
                     try await firebaseStorage.child(path).listAll()
                 }
             } catch {
-                throw Exception(
-                    error,
-                    metadata: .init(sender: self)
-                )
+                throw exception(from: error)
             }
         }
 
@@ -968,14 +962,56 @@ final class CoreStorage: @unchecked Sendable {
             } onCancel: {
                 cancelTransfer()
             }
-        } catch let error as Exception {
-            throw error
         } catch {
-            throw Exception(
+            throw exception(from: error)
+        }
+    }
+
+    /// Storage errors wrap the server's HTTP status error, whose
+    /// identifier would otherwise fold into the exception code and
+    /// give every HTTP failure the not-found code. Not-found and
+    /// unknown errors take their catalogued codes; other storage
+    /// errors derive their codes without the wrapped error.
+    private func exception(from error: Error) -> Exception {
+        if let exception = error as? Exception { return exception }
+
+        let nsError = error as NSError
+        guard nsError.domain == StorageErrorDomain else {
+            return Exception(
                 error,
                 metadata: .init(sender: self)
             )
         }
+
+        let staticErrorCode: String? = switch StorageErrorCode(rawValue: nsError.code) {
+        case .objectNotFound: AppException.Networking.Storage.storageItemDoesNotExist.errorCode
+        case .unknown: AppException.Networking.Storage.genericStorageError.errorCode
+        default: nil
+        }
+
+        var userInfo = nsError.userInfo
+        guard let staticErrorCode else {
+            userInfo[NSUnderlyingErrorKey] = nil
+            return Exception(
+                NSError(
+                    domain: nsError.domain,
+                    code: nsError.code,
+                    userInfo: userInfo
+                ),
+                metadata: .init(sender: self)
+            )
+        }
+
+        userInfo[NSLocalizedDescriptionKey] = nil
+        userInfo["NSErrorCode"] = nsError.code
+        userInfo["NSErrorDomain"] = nsError.domain
+        userInfo["StaticErrorCode"] = staticErrorCode
+
+        return Exception(
+            nsError.localizedDescription,
+            userInfo: userInfo,
+            metadata: .init(sender: self)
+        )
     }
 
     private func getFileMetadata(
@@ -985,10 +1021,7 @@ final class CoreStorage: @unchecked Sendable {
             do {
                 return try await firebaseStorage.child(path).getMetadata()
             } catch {
-                throw Exception(
-                    error,
-                    metadata: .init(sender: self)
-                )
+                throw exception(from: error)
             }
         }
     }

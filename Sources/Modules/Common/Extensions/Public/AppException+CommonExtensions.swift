@@ -59,14 +59,6 @@ public extension AppException {
 
         /// Catalogued translation exceptions.
         public enum Translation {
-            /// All available translation platforms have
-            /// been exhausted without success.
-            public static let exhaustedAvailablePlatforms: AppException = .init("C526")
-
-            /// The translation input and output are
-            /// identical.
-            public static let sameTranslationInputOutput: AppException = .init("6CEB")
-
             /// Derivation of the translation failed.
             public static let translationDerivationFailed: AppException = .init("43B4")
         }

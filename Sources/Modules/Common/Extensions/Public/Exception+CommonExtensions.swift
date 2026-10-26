@@ -198,7 +198,7 @@ public extension Exception {
             .init(
                 "Read/write access has been disabled.",
                 isReportable: false,
-                metadata: .init(sender: self)
+                metadata: metadata
             )
         }
 
