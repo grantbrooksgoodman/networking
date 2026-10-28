@@ -14,7 +14,7 @@ import Foundation
 /// endpoints the app communicates with. Use
 /// ``Networking/Config/setEnvironment(_:)`` to change the
 /// active environment at runtime.
-public enum NetworkEnvironment: String, Codable {
+public enum NetworkEnvironment: String, Codable, Sendable {
     // MARK: - Cases
 
     /// The development environment.

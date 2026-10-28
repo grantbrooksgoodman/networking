@@ -97,105 +97,43 @@ extension DevModeAction {
 
         return DevModeAction(
             title: "Inspect Network Health",
+            iconConfiguration: .init(
+                backgroundColor: .mint,
+                overlay: .symbol(name: "waveform.path.ecg")
+            ),
             perform: inspectNetworkHealth
         )
     }
 
     static var networkingOptionsAction: DevModeAction {
-        @Sendable
-        func networkingOptions() {
-            Task { @MainActor in
-                let actions: [AKAction] = [
-                    inspectNetworkHealthAction,
-                    switchEnvironmentAction,
-                    toggleNetworkActivityIndicatorAction,
-                ].map {
-                    AKAction(
-                        $0.title,
-                        effect: $0.perform
-                    )
-                }
-
-                await AKActionSheet(
-                    title: "Networking Options",
-                    actions: actions
-                ).present(translating: [])
-            }
-        }
-
-        return DevModeAction(
+        .init(
             title: "Networking Options",
-            perform: networkingOptions
+            iconConfiguration: .init(
+                backgroundColor: .green,
+                overlay: .symbol(name: "network")
+            ),
+            destination: [
+                inspectNetworkHealthAction,
+                switchEnvironmentAction,
+                toggleNetworkActivityIndicatorAction,
+            ]
         )
     }
 
     private static var switchEnvironmentAction: DevModeAction {
-        @Sendable
-        func switchEnvironment() {
-            Task {
-                @Sendable
-                func switchTo(_ environment: NetworkEnvironment) async {
-                    @Dependency(\.coreKit.utils) var coreUtilities: CoreKit.Utilities
-                    @Dependency(\.userDefaults) var defaults: UserDefaults
-
-                    Networking.config.setEnvironment(environment)
-
-                    coreUtilities.clearCaches()
-                    try? coreUtilities.eraseApplicationSupportDirectory()
-                    try? coreUtilities.eraseDocumentsDirectory()
-                    try? coreUtilities.eraseTemporaryDirectory()
-
-                    defaults.reset()
-
-                    await AKAlert(
-                        message: "Switched to \(environment.description) environment. You must now restart the app.",
-                        actions: [.init("Exit", style: .destructivePreferred) { exit(0) }]
-                    ).present(translating: [])
-                }
-
-                let switchToDevelopmentAction: AKAction = .init("Switch to Development") {
-                    Task { await switchTo(.development) }
-                }
-
-                let switchToProductionAction: AKAction = .init("Switch to Production", style: .destructive) {
-                    Task { await switchTo(.production) }
-                }
-
-                let switchToStagingAction: AKAction = .init("Switch to Staging") {
-                    Task { await switchTo(.staging) }
-                }
-
-                var actions = [AKAction]()
-                switch Networking.config.environment {
-                case .development:
-                    actions = [
-                        switchToProductionAction,
-                        switchToStagingAction,
-                    ]
-
-                case .production:
-                    actions = [
-                        switchToDevelopmentAction,
-                        switchToStagingAction,
-                    ]
-
-                case .staging:
-                    actions = [
-                        switchToDevelopmentAction,
-                        switchToProductionAction,
-                    ]
-                }
-
-                await AKActionSheet(
-                    title: "Switch from \(Networking.config.environment.description) Environment",
-                    actions: actions
-                ).present(translating: [])
-            }
-        }
-
-        return DevModeAction(
+        .init(
             title: "Switch Environment",
-            perform: switchEnvironment
+            iconConfiguration: .init(
+                backgroundColor: .orange,
+                overlay: .symbol(name: "arrow.left.arrow.right")
+            ),
+            destination: [
+                NetworkEnvironment.development,
+                .production,
+                .staging,
+            ]
+            .filter { $0 != Networking.config.environment }
+            .map(switchAction(to:))
         )
     }
 
@@ -205,19 +143,84 @@ extension DevModeAction {
             @Dependency(\.coreKit.hud) var coreHUD: CoreKit.HUD
             @Persistent(.isNetworkActivityIndicatorEnabled) var persistedValue: Bool?
 
-            guard let value = persistedValue else {
-                persistedValue = true
-                coreHUD.showSuccess(text: "ON")
-                return
-            }
+            persistedValue = !(persistedValue == true)
+            coreHUD.showSuccess(
+                text: "Network Activity Indicator \(persistedValue == true ? "Enabled" : "Disabled")"
+            )
 
-            persistedValue = !value
-            coreHUD.showSuccess(text: !value == true ? "ON" : "OFF")
+            // Runtime-registered actions are stored as values, so the
+            // parent must be re-registered for the switch to reflect
+            // the new state.
+            DevModeService.insertAction(
+                .networkingOptionsAction,
+                at: 0
+            )
         }
 
-        return DevModeAction(
-            title: "Toggle Network Activity Indicator",
+        @Persistent(.isNetworkActivityIndicatorEnabled) var persistedValue: Bool?
+        return .init(
+            title: "Network Activity Indicator",
+            iconConfiguration: .init(
+                backgroundColor: .indigo,
+                overlay: .symbol(name: "antenna.radiowaves.left.and.right")
+            ),
+            interaction: .switch(isOn: persistedValue == true),
             perform: toggleNetworkActivityIndicator
         )
+    }
+
+    private static func switchAction(to environment: NetworkEnvironment) -> DevModeAction {
+        @Sendable
+        func switchEnvironment() {
+            Task {
+                @Dependency(\.coreKit.utils) var coreUtilities: CoreKit.Utilities
+                @Dependency(\.userDefaults) var defaults: UserDefaults
+
+                Networking.config.setEnvironment(environment)
+
+                coreUtilities.clearCaches()
+                try? coreUtilities.eraseApplicationSupportDirectory()
+                try? coreUtilities.eraseDocumentsDirectory()
+                try? coreUtilities.eraseTemporaryDirectory()
+
+                defaults.reset()
+
+                await AKAlert(
+                    message: "Switched to \(environment.description) environment. You must now restart the app.",
+                    actions: [.init("Exit", style: .destructivePreferred) { exit(0) }]
+                ).present(translating: [])
+            }
+        }
+
+        return .init(
+            title: "Switch to \(environment.description)",
+            iconConfiguration: switchActionIconConfiguration(for: environment),
+            isDestructive: environment == .production,
+            perform: switchEnvironment
+        )
+    }
+
+    private static func switchActionIconConfiguration(
+        for environment: NetworkEnvironment
+    ) -> SquareIconView.Configuration {
+        switch environment {
+        case .development:
+            .init(
+                backgroundColor: .blue,
+                overlay: .symbol(name: "hammer.fill")
+            )
+
+        case .production:
+            .init(
+                backgroundColor: .red,
+                overlay: .symbol(name: "shippingbox.fill")
+            )
+
+        case .staging:
+            .init(
+                backgroundColor: .purple,
+                overlay: .symbol(name: "theatermasks.fill")
+            )
+        }
     }
 }
