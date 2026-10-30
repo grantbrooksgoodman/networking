@@ -203,24 +203,15 @@ extension DevModeAction {
     private static func switchActionIconConfiguration(
         for environment: NetworkEnvironment
     ) -> SquareIconView.Configuration {
-        switch environment {
-        case .development:
-            .init(
-                backgroundColor: .blue,
-                overlay: .symbol(name: "hammer.fill")
-            )
-
-        case .production:
-            .init(
-                backgroundColor: .red,
-                overlay: .symbol(name: "shippingbox.fill")
-            )
-
-        case .staging:
-            .init(
-                backgroundColor: .purple,
-                overlay: .symbol(name: "theatermasks.fill")
-            )
+        let symbolName = switch environment {
+        case .development: "hammer.fill"
+        case .production: "shippingbox.fill"
+        case .staging: "theatermasks.fill"
         }
+
+        return .init(
+            backgroundColor: environment.indicatorColor,
+            overlay: .symbol(name: symbolName)
+        )
     }
 }

@@ -31,11 +31,7 @@ public extension Networking {
         /// The color of the Developer Mode indicator dot,
         /// based on the active network environment.
         public var developerModeIndicatorDotColor: Color {
-            switch Networking.config.environment {
-            case .development: .green
-            case .production: .red
-            case .staging: .orange
-            }
+            Networking.config.environment.indicatorColor
         }
     }
 }
