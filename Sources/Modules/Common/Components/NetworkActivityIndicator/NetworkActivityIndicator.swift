@@ -21,7 +21,8 @@ struct NetworkActivityIndicator: View {
 
     // MARK: - Properties
 
-    @StateObject private var viewModel: ViewModel<NetworkActivityIndicatorReducer>
+    @StateObject
+    private var viewModel: ViewModel<NetworkActivityIndicatorReducer>
 
     // MARK: - Init
 
