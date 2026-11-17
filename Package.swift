@@ -21,7 +21,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/grantbrooksgoodman/app-subsystem",
-            branch: "main"
+            exact: "32.0.6"
         ),
         .package(
             url: "https://github.com/firebase/firebase-ios-sdk.git",
